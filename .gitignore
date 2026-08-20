@@ -2,3 +2,52 @@ Model/st_ai_output/
 Model/st_ai_ws/
 Model/*.xSPI2.bin
 Model/*.hex
+
+# CODEX 2026-08-20: Keep generated STM32CubeIDE build output out of Git.
+**/Debug/
+**/Release/
+*.o
+*.d
+*.su
+*.cyclo
+*.elf
+*.map
+*.list
+*.hex
+*.bin
+
+# Eclipse workspace state is machine-specific; project metadata under Appli is kept.
+/.settings/
+/.metadata/
+
+# Local editor and temporary files.
+*.log
+*.tmp
+*.bak
+*~
+
+# CODEX 2026-08-20: Unused optional middleware shipped with the board package.
+/Middlewares/ATKNCR/
+/Middlewares/FATFS/
+/Middlewares/MALLOC/
+/Middlewares/MJPEG/
+/Middlewares/NETXDUO/
+/Middlewares/PICTURE/
+/Middlewares/STM32_IMAGE_PROCESSING_LIBRARY/
+/Middlewares/T9INPUT/
+/Middlewares/TEXT/
+/Middlewares/USBX/
+/Middlewares/USMART/
+/Middlewares/WAVDEC/
+/Middlewares/WAVENC/
+/Middlewares/STM32_MW_ISP/isp/USB_Device/
+/Middlewares/STM32_MW_ISP/isp_param_conf/
+/Middlewares/ThreadX/utility/
+
+# SDK headers/assets are provided by the parent Software_Package referenced by .cproject.
+/Drivers/STM32N6xx_HAL_Driver/Inc/
+/Drivers/CMSIS/Include/
+/Drivers/CMSIS/Device/
+/Drivers/CMSIS/DSP/Source/
+/Middlewares/AI/Npu/Devices/STM32N6XX/*.h
+/Utilities/Fonts/

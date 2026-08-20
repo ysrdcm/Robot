@@ -56,6 +56,8 @@ void SVC_Handler(void);
 void DebugMon_Handler(void);
 void DCMIPP_IRQHandler(void);
 void TIM9_IRQHandler(void);
+void USART1_IRQHandler(void); /* CODEX 2026-07-24: BT-410 receive interrupt. */
+void UART4_IRQHandler(void);
 /* USER CODE BEGIN EFP */
 
 /* USER CODE END EFP */

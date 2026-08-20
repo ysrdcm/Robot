@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "cmw_camera.h"
+#include "rc100.h" /* CODEX 2026-07-24: Direct USART1 RXFNE handler. */
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -58,6 +59,8 @@
 /* External variables --------------------------------------------------------*/
 extern DCMIPP_HandleTypeDef hdcmipp;//这一行可能要注释掉
 extern TIM_HandleTypeDef htim9;
+extern UART_HandleTypeDef huart1;
+extern UART_HandleTypeDef huart4;
 /* USER CODE BEGIN EV */
 
 /* USER CODE END EV */
@@ -220,6 +223,29 @@ void TIM9_IRQHandler(void)
   /* USER CODE BEGIN TIM9_IRQn 1 */
 
   /* USER CODE END TIM9_IRQn 1 */
+}
+
+/**
+  * @brief This function handles USART1 global interrupt.
+  */
+void USART1_IRQHandler(void)
+{
+  /* CODEX 2026-07-24: Read BT-410 RXFNE directly for deterministic reception. */
+  RC100_UART_IRQHandler();
+}
+
+/**
+  * @brief This function handles UART4 global interrupt.
+  */
+void UART4_IRQHandler(void)
+{
+  /* USER CODE BEGIN UART4_IRQn 0 */
+
+  /* USER CODE END UART4_IRQn 0 */
+  HAL_UART_IRQHandler(&huart4);
+  /* USER CODE BEGIN UART4_IRQn 1 */
+
+  /* USER CODE END UART4_IRQn 1 */
 }
 
 /* USER CODE END 1 */

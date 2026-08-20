@@ -47,7 +47,8 @@
 #define NN_CLASSES_TABLE                        {"person", "not_person"}
 
 #define POSTPROCESS_TYPE                        POSTPROCESS_OD_YOLO_V2_UF
-#define AI_OBJDETECT_YOLOV2_PP_CONF_THRESHOLD   0.6f
+/* CODEX 2026-07-27: Raise the person confidence threshold to reduce false detections. */
+#define AI_OBJDETECT_YOLOV2_PP_CONF_THRESHOLD   0.80f
 #define AI_OBJDETECT_YOLOV2_PP_IOU_THRESHOLD    0.3f
 #define AI_OBJDETECT_YOLOV2_PP_MAX_BOXES_LIMIT  10
 

@@ -37,6 +37,12 @@ static void (*app_camera_display_pipe_vsync_user_cb)(void) = NULL;
 static void (*app_camera_display_pipe_frame_user_cb)(void) = NULL;
 static void (*app_camera_nn_pipe_vsync_user_cb)(void) = NULL;
 static void (*app_camera_nn_pipe_frame_user_cb)(void) = NULL;
+/* CODEX 2026-07-26: Retain active buffers/config for thread-context recovery. */
+static volatile uint8_t app_camera_recover_request;
+static uint8_t *app_camera_display_destination;
+static uint8_t *app_camera_nn_destination;
+static uint32_t app_camera_display_capture_mode;
+static uint32_t app_camera_nn_capture_mode;
 
 void app_camera_init(void (*display_pipe_vsync_cb)(void), void (*display_pipe_frame_cb)(void), void (*nn_pipe_vsync_cb)(void), void (*nn_pipe_frame_cb)(void))
 {
@@ -103,22 +109,88 @@ void app_camera_init(void (*display_pipe_vsync_cb)(void), void (*display_pipe_fr
 
 void app_camera_display_pipe_start(uint8_t *display_pipe_destination, uint32_t capture_mode)
 {
+    app_camera_display_destination = display_pipe_destination;
+    app_camera_display_capture_mode = capture_mode;
     HAL_DCMIPP_PIPE_Start(&hdcmipp, DCMIPP_PIPE1, (uint32_t)display_pipe_destination, capture_mode);
 }
 
 void app_camera_nn_pipe_start(uint8_t *nn_pipe_destination, uint32_t capture_mode)
 {
+    app_camera_nn_destination = nn_pipe_destination;
+    app_camera_nn_capture_mode = capture_mode;
     HAL_DCMIPP_PIPE_Start(&hdcmipp, DCMIPP_PIPE2, (uint32_t)nn_pipe_destination, capture_mode);
 }
 
 void app_camera_display_pipe_set_address(uint8_t *display_pipe_destination)
 {
+    app_camera_display_destination = display_pipe_destination;
     HAL_DCMIPP_PIPE_SetMemoryAddress(&hdcmipp, DCMIPP_PIPE1, DCMIPP_MEMORY_ADDRESS_0, (uint32_t)display_pipe_destination);
 }
 
 void app_camera_nn_pipe_set_address(uint8_t *nn_pipe_destination)
 {
+    app_camera_nn_destination = nn_pipe_destination;
     HAL_DCMIPP_PIPE_SetMemoryAddress(&hdcmipp, DCMIPP_PIPE2, DCMIPP_MEMORY_ADDRESS_0, (uint32_t)nn_pipe_destination);
+}
+
+uint8_t app_camera_recovery_requested(void)
+{
+    return app_camera_recover_request;
+}
+
+HAL_StatusTypeDef app_camera_recover(void)
+{
+    HAL_StatusTypeDef display_status;
+    HAL_StatusTypeDef nn_status;
+
+    if ((app_camera_display_destination == NULL) ||
+        (app_camera_nn_destination == NULL))
+    {
+        return HAL_ERROR;
+    }
+
+    /*
+     * CODEX 2026-07-26: Stop/restart outside the ISR. HAL marks an overrun
+     * pipe ERROR and disables its interrupt, so it cannot self-recover.
+     */
+    HAL_NVIC_DisableIRQ(DCMIPP_IRQn);
+    display_status = HAL_DCMIPP_PIPE_Stop(&hdcmipp, DCMIPP_PIPE1);
+    nn_status = HAL_DCMIPP_PIPE_Stop(&hdcmipp, DCMIPP_PIPE2);
+
+    if ((display_status == HAL_OK) && (nn_status == HAL_OK))
+    {
+        hdcmipp.ErrorCode = HAL_DCMIPP_ERROR_NONE;
+        hdcmipp.State = HAL_DCMIPP_STATE_READY;
+        __HAL_DCMIPP_CLEAR_FLAG(
+            &hdcmipp,
+            DCMIPP_FLAG_AXI_TRANSFER_ERROR |
+            DCMIPP_FLAG_PARALLEL_SYNC_ERROR |
+            DCMIPP_FLAG_PIPE1_OVR |
+            DCMIPP_FLAG_PIPE2_OVR);
+
+        display_status = HAL_DCMIPP_PIPE_Start(
+            &hdcmipp, DCMIPP_PIPE1,
+            (uint32_t)app_camera_display_destination,
+            app_camera_display_capture_mode);
+        nn_status = HAL_DCMIPP_PIPE_Start(
+            &hdcmipp, DCMIPP_PIPE2,
+            (uint32_t)app_camera_nn_destination,
+            app_camera_nn_capture_mode);
+        /* CODEX 2026-07-26: HAL disables these sources after a global error. */
+        __HAL_DCMIPP_ENABLE_IT(
+            &hdcmipp,
+            DCMIPP_IT_AXI_TRANSFER_ERROR |
+            DCMIPP_IT_PARALLEL_SYNC_ERROR);
+    }
+
+    if ((display_status == HAL_OK) && (nn_status == HAL_OK))
+    {
+        app_camera_recover_request = 0U;
+    }
+    HAL_NVIC_EnableIRQ(DCMIPP_IRQn);
+
+    return ((display_status == HAL_OK) && (nn_status == HAL_OK)) ?
+           HAL_OK : HAL_ERROR;
 }
 
 void app_camera_isp_update(void)
@@ -231,5 +303,25 @@ void HAL_DCMIPP_PIPE_FrameEventCallback(DCMIPP_HandleTypeDef *hdcmipp, uint32_t 
                 app_camera_nn_pipe_frame_user_cb();
             }
         }
+    }
+}
+
+void HAL_DCMIPP_PIPE_ErrorCallback(DCMIPP_HandleTypeDef *hdcmipp,
+                                   uint32_t Pipe)
+{
+    (void)Pipe;
+    if (hdcmipp->Instance == DCMIPP)
+    {
+        /* CODEX 2026-07-26: Defer blocking recovery to the control thread. */
+        app_camera_recover_request = 1U;
+    }
+}
+
+void HAL_DCMIPP_ErrorCallback(DCMIPP_HandleTypeDef *hdcmipp)
+{
+    if (hdcmipp->Instance == DCMIPP)
+    {
+        /* CODEX 2026-07-26: Covers parallel-sync and AXI transfer errors. */
+        app_camera_recover_request = 1U;
     }
 }
