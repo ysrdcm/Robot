@@ -7,15 +7,6 @@
  * @brief       OV5640 驱动代码
  * @license     Copyright (c) 2023-2035, 广州市星翼电子科技有限公司
  ****************************************************************************************************
- * @attention
- *
- * 实验平台:正点原子 N647开发板
- * 在线视频:www.yuanzige.com
- * 技术论坛:www.openedv.com
- * 公司网址:www.alientek.com
- * 购买地址:openedv.taobao.com
- * 
- ****************************************************************************************************
  */
 
 #ifndef __OV5640_H
@@ -44,7 +35,6 @@
 #define OV5640_ID                   0x5640
 #define OV5640_ADDR                 0x3C
 
-/* 函数声明 */
 uint8_t ov5640_read_reg(uint16_t reg);                                                          /* 读OV5640寄存器 */
 void ov5640_write_reg(uint16_t reg, uint8_t data);                                              /* 写OV5640寄存器 */
 uint8_t ov5640_init(void);                                                                      /* 初始化OV5640 */

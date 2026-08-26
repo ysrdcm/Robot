@@ -3,7 +3,6 @@
 
 #include "main.h"
 
-// 函数声明
 void Track_Process(void);
 uint8_t Check_Black_Line(void);
 

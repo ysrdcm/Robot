@@ -1,21 +1,7 @@
 /**
- ****************************************************************************************************
- * @file        app.c
- * @author      正点原子团队(ALIENTEK)
- * @version     V1.0
- * @date        2025-01-13
- * @brief       app.c文件
- * @license     Copyright (c) 2020-2032, 广州市星翼电子科技有限公司
- ****************************************************************************************************
- * @attention
- * 
- * 实验平台:正点原子 N647开发板
- * 在线视频:www.yuanzige.com
- * 技术论坛:www.openedv.com
- * 公司网址:www.alientek.com
- * 购买地址:openedv.taobao.com
- * 
- ****************************************************************************************************
+ * @file app.c
+ * @brief Patrol control, AI inference, display and event-log tasks.
+ * @license Copyright (c) 2020-2032, 广州市星翼电子科技有限公司
  */
 
 #include "app.h"
@@ -32,7 +18,6 @@
 #include <stdio.h>
 #include <string.h>
 
-// ==================================
 #include "tracker.h"
 #include "beep.h"
 #include "car.h"
@@ -50,8 +35,8 @@ static float    ai_person_y = 0;
 static float    ai_person_w = 0;
 static float    ai_person_h = 0;
 
-static uint16_t raw_detect_confirm_cnt = 0; // 连续检测到人的帧计数器
-static uint16_t raw_loss_confirm_cnt = 0;   // 连续丢失目标的帧计数器
+static uint16_t raw_detect_confirm_cnt = 0;
+static uint16_t raw_loss_confirm_cnt = 0;
 static float    smooth_w = 0;
 static float    smooth_h = 0;
 
@@ -86,19 +71,17 @@ static float    smooth_h = 0;
 #define WIFI_PAGE_BUFFER_SIZE              4096U
 #define WIFI_IPD_HEADER_SIZE               96U
 
-// 定义机器人的四大状态
 typedef enum {
-    STATE_PATROL,    // 巡视
-    STATE_AVOID,     // 避障
-    STATE_WARNING,   // 示警（蜂鸣器响）
-    STATE_COMBAT     // 战斗（激光开火）
+    STATE_PATROL,
+    STATE_AVOID,
+    STATE_WARNING,
+    STATE_COMBAT
 } RobotState_t;
 
 /* Robot control thread. */
 static TX_THREAD ctrl_thread;
 static UCHAR ctrl_thread_stack[2048];
 static VOID ctrl_thread_entry(ULONG id);
-// =================================================
 
 typedef struct {
     int32_t nb_detect;
@@ -150,10 +133,7 @@ static app_bqueue_t nn_output_queue;
 static const char *nn_classes_table[NN_CLASSES] = NN_CLASSES_TABLE;
 
 static app_cpuload_t cpuload;
-// =================================================
 
-// =================================================
-// 声明 WiFi 线程
 static TX_THREAD wifi_thread;
 /* HTTP formatting and AT parsing require more stack than control tasks. */
 static UCHAR wifi_thread_stack[4096];
@@ -177,7 +157,6 @@ static float latest_event_confidence = 0.0f;
 static uint32_t latest_event_tick = 0;
 static uint32_t latest_event_id = 0;
 static uint8_t person_event_active = 0;
-// =================================================
 
 /* Build a browser-readable thumbnail from the exact RGB888 inference frame. */
 static void snapshot_write_u16(uint8_t *dst, uint16_t value)
@@ -474,7 +453,6 @@ void Camera_Servo_Update(float target_x, uint8_t is_tracking)
 {
     static int8_t auto_dir = 1;
 
-    // 引入平滑目标点滤波
     static float filtered_target_x = 0.5f;
     static uint32_t last_tracking_tick;
     uint32_t now = HAL_GetTick();
@@ -493,17 +471,14 @@ void Camera_Servo_Update(float target_x, uint8_t is_tracking)
     camera_servo_last_update_tick = now;
 
     if (is_tracking) {
-        // 1. 双重过滤：只有当前检测点与已滤波点的绝对偏差大于 0.05 (5%画面) 时，才去混合新数据
+        /* Ignore small detector jitter, then low-pass the remaining movement. */
         if (fabs(target_x - filtered_target_x) > 0.05f) {
-            // 一阶低通滤波：新数据只占 10% 的权重，90% 保持原样，彻底抹平高频抖动
             filtered_target_x = filtered_target_x * 0.90f + target_x * 0.10f;
         }
 
-        // 2. 映射到PWM脉宽
         float error = filtered_target_x - 0.5f;
         float step = 0.0f;
 
-        // 3. 减小硬件逼近系数：从 0.15f 降到 0.06f，让舵机更温柔、更平滑地滑向目标点
         /*
          * Incremental control holds the current angle when
          * the person is centered instead of repeatedly commanding 1500 us.
@@ -524,7 +499,7 @@ void Camera_Servo_Update(float target_x, uint8_t is_tracking)
     } else if ((last_tracking_tick == 0U) ||
                ((now - last_tracking_tick) >
                 SERVO_DETECTION_HOLD_MS)) {
-        // 巡视模式：左右扫视
+        /* Resume scanning only after the short detection hold expires. */
         camera_servo_pwm += auto_dir * CAMERA_SERVO_SCAN_STEP;
         if (camera_servo_pwm > CAMERA_SERVO_PWM_MAX) {
             camera_servo_pwm = CAMERA_SERVO_PWM_MAX;
@@ -534,7 +509,7 @@ void Camera_Servo_Update(float target_x, uint8_t is_tracking)
             camera_servo_pwm = CAMERA_SERVO_PWM_MIN;
             auto_dir = 1;
         }
-        filtered_target_x = 0.5f; // 重置历史值
+        filtered_target_x = 0.5f;
     }
     /* Clamp tracking and scan motion to the SG90 range. */
     if (camera_servo_pwm > CAMERA_SERVO_PWM_MAX)
@@ -616,7 +591,6 @@ static VOID ctrl_thread_entry(ULONG id)
 
     while(1)
     {
-        // 1. 获取传感器与AI数据
         uint32_t now = HAL_GetTick();
 
         if (((app_camera_recovery_requested() != 0U) ||
@@ -669,7 +643,6 @@ static VOID ctrl_thread_entry(ULONG id)
         float p_w = ai_person_w; float p_h = ai_person_h;
         tx_mutex_put(&ai_data_lock);
 
-        // 2. 无论什么状态，只要有目标，云台和摄像头就要跟踪
         /* Manual drive has priority, while the gimbal continues AI tracking. */
         {
             rc100_state_t remote_state;
@@ -759,23 +732,21 @@ static VOID ctrl_thread_entry(ULONG id)
 
         Camera_Servo_Update(p_x, p_det);
 
-        // 3. 状态机流转
         switch(state)
         {
             case STATE_PATROL:
-                Laser_Fire(0); // 确保激光关闭
-                BEEP(0);       // 确保蜂鸣器关闭
+                Laser_Fire(0);
+                BEEP(0);
 
                 if (p_det) {
-                    // 发现敌人 -> 切入示警模式
                     Car_Stop();
                     state = STATE_WARNING;
                     state_start_time = HAL_GetTick();
-                    lock_width = p_w;   // 记录初始大小，用于判断是否靠近
+                    /* Save the initial box size for approach estimation. */
+                    lock_width = p_w;
                     lock_height = p_h;
                 }
                 else if (dist > 0 && dist < 25.0f) {
-                    // 前方25cm有障碍物 -> 切入避障模式
                     Car_Stop();
                     state = STATE_AVOID;
                     state_start_time = HAL_GetTick();
@@ -786,7 +757,7 @@ static VOID ctrl_thread_entry(ULONG id)
                 break;
 
             case STATE_AVOID:
-                // 战斗优先级最高，避障时发现人也立刻进入示警
+                /* Person detection preempts the timed avoidance sequence. */
                 if (p_det) {
                     Car_Stop();
                     state = STATE_WARNING;
@@ -796,12 +767,12 @@ static VOID ctrl_thread_entry(ULONG id)
                 } else {
                     uint32_t elapsed = HAL_GetTick() - state_start_time;
 
-                    const uint32_t dt_back = 200;   // 1. 后退时间
-                    const uint32_t dt_turn = 2120;   // 2. 原地转 90 度所需时间（左转右转复用）
-                    const uint32_t dt_fw_w = 1800;   // 3. 侧向驶出距离的时间 (决定矩形的宽)
-                    const uint32_t dt_fw_l = 4450;  // 4. 平行越过障碍物的时间 (决定矩形的长)
+                    const uint32_t dt_back = 200;
+                    const uint32_t dt_turn = 2120;
+                    const uint32_t dt_fw_w = 1800;
+                    const uint32_t dt_fw_l = 4450;
 
-                    // 计算时间轴节点 (累加)
+                    /* Cumulative boundaries for the rectangular detour. */
                     const uint32_t t1 = dt_back;
                     const uint32_t t2 = t1 + dt_turn;
                     const uint32_t t3 = t2 + dt_fw_w;
@@ -816,85 +787,79 @@ static VOID ctrl_thread_entry(ULONG id)
 
 
                     if (elapsed > t2 && Check_Black_Line() == 1) {
-                    	Car_Stop();
-                    	state = STATE_PATROL;
-                    	break; // 触发打断，直接跳出本轮状态机
+                        Car_Stop();
+                        state = STATE_PATROL;
+                        break;
                     }
 
-                    // 3. 全局打断机制 B：避障途中遭遇二次障碍物！
-                    // 如果在后退之后的任何移动中，前方突然又出现不足 15cm 的障碍物
+                    /* Restart the detour if another close obstacle appears. */
                     if (elapsed > t1 && dist > 0 && dist < 15.0f) {
-                    	Car_Stop();
-                    	// 核心：直接重置状态机时间戳，把这个新障碍物当成一次全新的避障任务（重新后退、左转）
-                    	state_start_time = HAL_GetTick();
-                    	break; // 触发打断
+                        Car_Stop();
+                        state_start_time = HAL_GetTick();
+                        break;
                     }
 
-                    // 4. 完整的矩形盲跑序列
                     if (elapsed < t1) {
-                    	Car_Backward();     // 阶段 1：后退，腾出转向空间
+                        Car_Backward();
                     }
                     else if (elapsed < t2) {
-                    	Car_TurnLeft();     // 阶段 2：左转 90 度，车头朝外
+                        Car_TurnLeft();
                     }
                     else if (elapsed < t3) {
-                    	Car_Forward();      // 阶段 3：直行，拉开与障碍物的侧向距离
+                        Car_Forward();
                     }
                     else if (elapsed < t4) {
-                    	Car_TurnRight();    // 阶段 4：右转 90 度，车身再次与黑线平行
+                        Car_TurnRight();
                     }
                     else if (elapsed < t5) {
-                    	Car_Forward();      // 阶段 5：直行，平行越过障碍物
+                        Car_Forward();
                     }
                     else if (elapsed < t6) {
-                    	Car_TurnRight();    // 阶段 6：右转 90 度，车头垂直指向原本的黑线
+                        Car_TurnRight();
                     }
                     else if (elapsed < t7) {
-                    	Car_Forward();      //
+                        Car_Forward();
                     }
                     else if (elapsed < t8) {
-                    	Car_TurnRight();     //
+                        Car_TurnRight();
                     }
                     else if (elapsed < t9) {
-                    	Car_Forward();      //
+                        Car_Forward();
                     }
                     else if (elapsed < t10) {
-                    	Car_TurnRight();     //
+                        Car_TurnRight();
                     }
                     else if (elapsed < t11) {
-                    	Car_Forward();      //
+                        Car_Forward();
                     }
                     else {
-                    	Car_Stop(); // 可选：稍微停顿一下稳住底盘
-                    	state = STATE_PATROL;
+                        Car_Stop();
+                        state = STATE_PATROL;
                     }
                 }
                 break;
 
             case STATE_WARNING:
                 if (!p_det) {
-                    // 人跑了，解除警报
                     state = STATE_PATROL;
                 } else {
                     uint32_t elapsed = HAL_GetTick() - state_start_time;
 
-                    // 蜂鸣器滴、滴、滴响3次 (每次周期500ms：250ms响，250ms停)
-                    // 3次需要 1500ms
-                    if (elapsed < 1800) {// 阶段0(0-300ms):响, 阶段1(300-600ms):停, 阶段2:响...
+                    /* Three 300 ms on/off warning pulses. */
+                    if (elapsed < 1800) {
                         uint32_t stage = elapsed / 300;
                         if (stage % 2 == 0) {
-                            BEEP(1); // 偶数阶段响
+                            BEEP(1);
                         } else {
-                            BEEP(0); // 奇数阶段停
+                            BEEP(0);
                         }
 
-                        // 判别靠近的威胁评估逻辑（保持不变）
+                        /* A 15% box growth indicates that the person approached. */
                         if ((p_w > lock_width * 1.15f) && (p_h > lock_height * 1.15f)) {
                             BEEP(0);
                             state = STATE_COMBAT;
                         }
                     } else {
-                        // 1.8秒后（三次示警完全结束），目标还在，进入战斗
                         BEEP(0);
                         state = STATE_COMBAT;
                     }
@@ -903,17 +868,13 @@ static VOID ctrl_thread_entry(ULONG id)
 
             case STATE_COMBAT:
                 if (!p_det) {
-                    // 敌人消失在视野中，战斗结束，继续巡视
                     state = STATE_PATROL;
                 } else {
-                    // 持续开火！
                     Laser_Fire(1);
                 }
                 break;
         }
 
-        // 线程休眠 20ms (大约50Hz的控制频率，既不占用大量CPU又足够顺滑)
-        // ThreadX默认1个Tick=10ms，所以休眠2个Tick
         tx_thread_sleep(1);
     }
 }

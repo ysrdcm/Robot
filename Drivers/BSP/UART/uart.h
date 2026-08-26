@@ -7,15 +7,6 @@
  * @brief       串口驱动代码
  * @license     Copyright (c) 2020-2032, 广州市星翼电子科技有限公司
  ****************************************************************************************************
- * @attention
- * 
- * 实验平台:正点原子 N647开发板
- * 在线视频:www.yuanzige.com
- * 技术论坛:www.openedv.com
- * 公司网址:www.alientek.com
- * 购买地址:openedv.taobao.com
- * 
- ****************************************************************************************************
  */
 
 #ifndef __UART_H
@@ -43,7 +34,6 @@ extern uint8_t g_uart_rx_buf[UART_REC_LEN]; /* 串口接收缓冲区 */
 extern uint16_t g_uart_rx_sta;              /* 串口接收状态标记 */
 #endif
 
-/* 函数声明 */
 void uart_init(uint32_t baudrate);             /* 初始化串口 */
 
 #endif
