@@ -82,6 +82,7 @@ static uint8_t esp_uart_read_raw(uint8_t *byte, uint32_t timeout_ms)
 
         if (tail != esp_uart_head)
         {
+            __DMB();
             *byte = esp_uart_ring[tail];
             esp_uart_tail = (uint16_t)((tail + 1U) & ESP8266_UART_RING_MASK);
             return 0U;
@@ -196,7 +197,15 @@ void ESP8266_Log_UART_Start(void)
 
 void ESP8266_Log_UART_Flush(void)
 {
+    uint32_t interrupt_state = __get_PRIMASK();
+
+    __disable_irq();
     esp_uart_tail = esp_uart_head;
+    if (interrupt_state == 0U)
+    {
+        __enable_irq();
+    }
+
     esp_pending_tail = esp_pending_head;
     esp_ipd_capture_reset();
 }
@@ -229,6 +238,7 @@ void ESP8266_Log_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     if (next != esp_uart_tail)
     {
         esp_uart_ring[head] = esp_uart_it_byte;
+        __DMB();
         esp_uart_head = next;
     }
     else

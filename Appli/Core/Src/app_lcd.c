@@ -72,16 +72,27 @@ void app_lcd_switch_bg_buffer(void)
 
 void app_lcd_draw_area_update(void)
 {
+    uint32_t interrupt_state = __get_PRIMASK();
+
     __disable_irq();
     HAL_LTDC_SetAddress_NoReload(bsp_lcd_get_ltdc_handle(), (uint32_t)app_lcd_fg_buffer[app_lcd_fg_buffer_load_idx], 1);
-    __enable_irq();
+    if (interrupt_state == 0U)
+    {
+        __enable_irq();
+    }
 }
 
 void app_lcd_draw_area_commit(void)
 {
+    uint32_t interrupt_state;
+
     SCB_CleanDCache_by_Addr(app_lcd_fg_buffer[app_lcd_fg_buffer_load_idx], sizeof(app_lcd_fg_buffer[app_lcd_fg_buffer_load_idx]));
+    interrupt_state = __get_PRIMASK();
     __disable_irq();
     HAL_LTDC_ReloadLayer(bsp_lcd_get_ltdc_handle(), LTDC_RELOAD_VERTICAL_BLANKING, 1);
-    __enable_irq();
+    if (interrupt_state == 0U)
+    {
+        __enable_irq();
+    }
     app_lcd_fg_buffer_load_idx = 1 - app_lcd_fg_buffer_load_idx;
 }

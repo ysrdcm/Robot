@@ -34,6 +34,7 @@
 #include "find.h"
 #include "wave.h"
 #include "beep.h"
+#include "tracker.h"
 
 /* USER CODE END Includes */
 
@@ -1318,22 +1319,25 @@ static VOID main_thread_entry(ULONG id)
   npu_cache_config();
   low_power_clock_config();
 
-  // 启动 TIM1 的通道 1 和通道 4 (对应两个电机)
-  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4);
+  /* Start all motor and servo PWM channels before enabling control. */
+  if ((HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1) != HAL_OK) ||
+      (HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4) != HAL_OK) ||
+      (HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1) != HAL_OK) ||
+      (HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_2) != HAL_OK) ||
+      (HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3) != HAL_OK) ||
+      (HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4) != HAL_OK) ||
+      (HAL_TIM_PWM_Start(&htim15, TIM_CHANNEL_1) != HAL_OK))
+  {
+    Error_Handler();
+  }
   __HAL_TIM_MOE_ENABLE(&htim1);
-
-  // 启动 TIM8 的通道 1 和通道 2 (对应另外两个电机)
-  HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);
-  HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_2);
   __HAL_TIM_MOE_ENABLE(&htim8);
+  Car_Stop();
 
-  /* TIM4 drives the two-axis gimbal; TIM15 drives the camera servo. */
-  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
-  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
-  HAL_TIM_PWM_Start(&htim15, TIM_CHANNEL_1);
-
-  Wave_Init();
+  if (Wave_Init() != HAL_OK)
+  {
+    Error_Handler();
+  }
   beep_init();
 
   app_run();
@@ -1499,6 +1503,18 @@ void Error_Handler(void)
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
+  if (htim1.Instance == TIM1)
+  {
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 0U);
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, 0U);
+  }
+  if (htim8.Instance == TIM8)
+  {
+    __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_1, 0U);
+    __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_2, 0U);
+  }
+  Laser_Fire(0U);
+  BEEP(0U);
   while (1)
   {
   }

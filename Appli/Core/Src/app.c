@@ -993,36 +993,50 @@ static VOID wifi_thread_entry(ULONG id)
 
 static void app_display_network_output(app_display_info_t *display_info);
 
+static void app_require_tx_success(UINT status)
+{
+    if (status != TX_SUCCESS)
+    {
+        Error_Handler();
+    }
+}
+
 void app_run(void)
 {
     app_lcd_init();
 
-    app_bqueue_init(&nn_input_queue, 2, (uint8_t *[2]){nn_input_buffers[0], nn_input_buffers[1]});
-    app_bqueue_init(&nn_output_queue, 2, (uint8_t *[2]){nn_output_buffers[0], nn_output_buffers[1]});
+    app_require_tx_success(app_bqueue_init(
+        &nn_input_queue, 2,
+        (uint8_t *[2]){nn_input_buffers[0], nn_input_buffers[1]}));
+    app_require_tx_success(app_bqueue_init(
+        &nn_output_queue, 2,
+        (uint8_t *[2]){nn_output_buffers[0], nn_output_buffers[1]}));
     app_cpuload_init(&cpuload);
     app_camera_init(app_camera_display_pipe_vsync_cb, app_camera_display_pipe_frame_cb, NULL, app_camera_nn_pipe_frame_cb);
 
-    tx_semaphore_create(&isp_semaphore, NULL, 0);
-    tx_semaphore_create(&display.update, NULL, 0);
-    tx_mutex_create(&display.lock, NULL, TX_INHERIT);
+    app_require_tx_success(tx_semaphore_create(&isp_semaphore, NULL, 0));
+    app_require_tx_success(tx_semaphore_create(&display.update, NULL, 0));
+    app_require_tx_success(tx_mutex_create(&display.lock, NULL, TX_INHERIT));
     /* Protect event data while the Wi-Fi thread serves it. */
-    tx_mutex_create(&snapshot_lock, "Snapshot Lock", TX_INHERIT);
+    app_require_tx_success(tx_mutex_create(
+        &snapshot_lock, "Snapshot Lock", TX_INHERIT));
 
-    tx_mutex_create(&ai_data_lock, "AI Lock", TX_INHERIT);
+    app_require_tx_success(tx_mutex_create(
+        &ai_data_lock, "AI Lock", TX_INHERIT));
     RC100_Init();
 
     camera_display_last_frame_tick = HAL_GetTick();
     camera_nn_last_frame_tick = camera_display_last_frame_tick;
     app_camera_display_pipe_start(app_lcd_get_bg_buffer(), CMW_MODE_CONTINUOUS);
 
-    tx_thread_create(&nn_thread, "NN Thread", nn_thread_entry, 0, nn_thread_stack, sizeof(nn_thread_stack), TX_MAX_PRIORITIES - 3, TX_MAX_PRIORITIES - 3, 10, TX_AUTO_START);
-    tx_thread_create(&pp_thread, "PP Thread", pp_thread_entry, 0, pp_thread_stack, sizeof(pp_thread_stack), TX_MAX_PRIORITIES - 2, TX_MAX_PRIORITIES - 2, 10, TX_AUTO_START);
-    tx_thread_create(&dp_thread, "DP Thread", dp_thread_entry, 0, dp_thread_stack, sizeof(dp_thread_stack), TX_MAX_PRIORITIES - 2, TX_MAX_PRIORITIES - 2, 10, TX_AUTO_START);
-    tx_thread_create(&isp_thread, "ISP Thread", isp_thread_entry, 0, isp_thread_stack, sizeof(isp_thread_stack), TX_MAX_PRIORITIES - 4, TX_MAX_PRIORITIES - 4, 10, TX_AUTO_START);
+    app_require_tx_success(tx_thread_create(&nn_thread, "NN Thread", nn_thread_entry, 0, nn_thread_stack, sizeof(nn_thread_stack), TX_MAX_PRIORITIES - 3, TX_MAX_PRIORITIES - 3, 10, TX_AUTO_START));
+    app_require_tx_success(tx_thread_create(&pp_thread, "PP Thread", pp_thread_entry, 0, pp_thread_stack, sizeof(pp_thread_stack), TX_MAX_PRIORITIES - 2, TX_MAX_PRIORITIES - 2, 10, TX_AUTO_START));
+    app_require_tx_success(tx_thread_create(&dp_thread, "DP Thread", dp_thread_entry, 0, dp_thread_stack, sizeof(dp_thread_stack), TX_MAX_PRIORITIES - 2, TX_MAX_PRIORITIES - 2, 10, TX_AUTO_START));
+    app_require_tx_success(tx_thread_create(&isp_thread, "ISP Thread", isp_thread_entry, 0, isp_thread_stack, sizeof(isp_thread_stack), TX_MAX_PRIORITIES - 4, TX_MAX_PRIORITIES - 4, 10, TX_AUTO_START));
 
     /* Control shares post-processing priority to keep actuator response timely. */
-    tx_thread_create(&ctrl_thread, "Ctrl Thread", ctrl_thread_entry, 0, ctrl_thread_stack, sizeof(ctrl_thread_stack), TX_MAX_PRIORITIES - 2, TX_MAX_PRIORITIES - 2, 10, TX_AUTO_START);
-    tx_thread_create(&wifi_thread, "WiFi Thread", wifi_thread_entry, 0, wifi_thread_stack, sizeof(wifi_thread_stack), TX_MAX_PRIORITIES - 1, TX_MAX_PRIORITIES - 1, 10, TX_AUTO_START);
+    app_require_tx_success(tx_thread_create(&ctrl_thread, "Ctrl Thread", ctrl_thread_entry, 0, ctrl_thread_stack, sizeof(ctrl_thread_stack), TX_MAX_PRIORITIES - 2, TX_MAX_PRIORITIES - 2, 10, TX_AUTO_START));
+    app_require_tx_success(tx_thread_create(&wifi_thread, "WiFi Thread", wifi_thread_entry, 0, wifi_thread_stack, sizeof(wifi_thread_stack), TX_MAX_PRIORITIES - 1, TX_MAX_PRIORITIES - 1, 10, TX_AUTO_START));
 }
 
 static void app_camera_display_pipe_vsync_cb(void)
@@ -1068,6 +1082,10 @@ static VOID nn_thread_entry(ULONG id)
     nn_period[1] = HAL_GetTick();
 
     nn_pipe_dst = app_bqueue_get_free(&nn_input_queue, 0);
+    if (nn_pipe_dst == NULL)
+    {
+        Error_Handler();
+    }
 
     app_camera_nn_pipe_start(nn_pipe_dst, CMW_MODE_CONTINUOUS);
 
@@ -1079,6 +1097,10 @@ static VOID nn_thread_entry(ULONG id)
 
         capture_buffer = app_bqueue_get_ready(&nn_input_queue);
         output_buffer = app_bqueue_get_free(&nn_output_queue, 1);
+        if ((capture_buffer == NULL) || (output_buffer == NULL))
+        {
+            Error_Handler();
+        }
 
         time_stamp = HAL_GetTick();
         LL_ATON_Set_User_Input_Buffer_Default(0, capture_buffer, nn_in_len);
@@ -1112,6 +1134,7 @@ static VOID pp_thread_entry(ULONG id)
     uint8_t *output_buffer;
     od_pp_out_t pp_output;
     uint32_t nn_pp[2];
+    int32_t detect_count;
     int32_t i;
 
     app_postprocess_init(&pp_params);
@@ -1119,15 +1142,29 @@ static VOID pp_thread_entry(ULONG id)
     while (1)
     {
         output_buffer = app_bqueue_get_ready(&nn_output_queue);
+        if (output_buffer == NULL)
+        {
+            Error_Handler();
+        }
         pp_output.pOutBuff = NULL;
 
         nn_pp[0] = HAL_GetTick();
         app_postprocess_run((void *[]){(void *)output_buffer}, 1, &pp_output, &pp_params);
         nn_pp[1] = HAL_GetTick();
 
+        detect_count = pp_output.nb_detect;
+        if ((pp_output.pOutBuff == NULL) || (detect_count < 0))
+        {
+            detect_count = 0;
+        }
+        else if (detect_count > (int32_t)AI_OBJDETECT_YOLOV2_PP_MAX_BOXES_LIMIT)
+        {
+            detect_count = (int32_t)AI_OBJDETECT_YOLOV2_PP_MAX_BOXES_LIMIT;
+        }
+
         tx_mutex_get(&display.lock, TX_WAIT_FOREVER);
-        display.info.nb_detect = pp_output.nb_detect;
-        for (i = 0; i < pp_output.nb_detect; i++)
+        display.info.nb_detect = detect_count;
+        for (i = 0; i < detect_count; i++)
         {
             display.info.detects[i] = pp_output.pOutBuff[i];
         }
@@ -1141,7 +1178,7 @@ static VOID pp_thread_entry(ULONG id)
         /* Select the highest-confidence person rather than assuming box zero. */
         od_pp_outBuffer_t *person = NULL;
         float best_person_conf = 0.0f;
-        for (i = 0; (pp_output.pOutBuff != NULL) && (i < pp_output.nb_detect); i++)
+        for (i = 0; i < detect_count; i++)
         {
             od_pp_outBuffer_t *candidate = &pp_output.pOutBuff[i];
             if ((candidate->class_index == PERSON_CLASS_INDEX) &&
@@ -1414,7 +1451,15 @@ static void app_display_network_output(app_display_info_t *display_info)
     line_nb += 2;
     UTIL_LCDEx_PrintfAt(0, LINE(line_nb), RIGHT_MODE, "FPS");
     line_nb += 1;
-    UTIL_LCDEx_PrintfAt(0, LINE(line_nb), RIGHT_MODE, "%.2f", 1000.0 / display_info->nn_period_ms);
+    if (display_info->nn_period_ms != 0U)
+    {
+        UTIL_LCDEx_PrintfAt(0, LINE(line_nb), RIGHT_MODE, "%.2f",
+                           1000.0 / display_info->nn_period_ms);
+    }
+    else
+    {
+        UTIL_LCDEx_PrintfAt(0, LINE(line_nb), RIGHT_MODE, "--");
+    }
     line_nb += 2;
     UTIL_LCDEx_PrintfAt(0, LINE(line_nb), RIGHT_MODE, "Peoples");
     line_nb += 1;

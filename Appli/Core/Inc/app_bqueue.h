@@ -24,7 +24,7 @@ typedef struct {
     uint8_t ready_idx;
 } app_bqueue_t;
 
-void app_bqueue_init(app_bqueue_t *bqueue, uint8_t buffer_nb, uint8_t **buffers);
+UINT app_bqueue_init(app_bqueue_t *bqueue, uint8_t buffer_nb, uint8_t **buffers);
 uint8_t *app_bqueue_get_free(app_bqueue_t *bqueue, uint8_t is_blocking);
 void app_bqueue_put_free(app_bqueue_t *bqueue);
 uint8_t *app_bqueue_get_ready(app_bqueue_t *bqueue);

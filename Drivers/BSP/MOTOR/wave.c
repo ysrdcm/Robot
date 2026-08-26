@@ -17,12 +17,22 @@ static volatile uint16_t capture_val1 = 0;
 static volatile uint16_t capture_val2 = 0;
 static volatile uint16_t high_time = 0;
 static volatile uint8_t  wave_waiting = 0;
+static uint8_t wave_initialized;
 
-void Wave_Init(void)
+HAL_StatusTypeDef Wave_Init(void)
 {
-    tx_semaphore_create(&wave_sem, "wave_sem", 0);
+    if (tx_semaphore_create(&wave_sem, "wave_sem", 0) != TX_SUCCESS)
+    {
+        return HAL_ERROR;
+    }
     HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_RESET);
-    HAL_TIM_Base_Start(&htim9);
+    if (HAL_TIM_Base_Start(&htim9) != HAL_OK)
+    {
+        (void)tx_semaphore_delete(&wave_sem);
+        return HAL_ERROR;
+    }
+    wave_initialized = 1U;
+    return HAL_OK;
 }
 
 /* Used only to form the HC-SR04 trigger pulse. */
@@ -36,10 +46,19 @@ static void delay_us(uint32_t us)
 float Wave_Get_Distance(void)
 {
     float distance = -1.0f;
+    uint32_t interrupt_state;
+    HAL_StatusTypeDef start_status;
+
+    if (wave_initialized == 0U)
+    {
+        return -1.0f;
+    }
 
     /* Drain a stale completion left by a timed-out measurement. */
     while (tx_semaphore_get(&wave_sem, TX_NO_WAIT) == TX_SUCCESS) { }
 
+    interrupt_state = __get_PRIMASK();
+    __disable_irq();
     capture_state = 0;
     high_time = 0;
     wave_waiting = 1;
@@ -47,7 +66,20 @@ float Wave_Get_Distance(void)
     __HAL_TIM_CLEAR_IT(&htim9, TIM_IT_CC1);
 
     /* Arm capture before triggering so the rising echo edge cannot be missed. */
-    HAL_TIM_IC_Start_IT(&htim9, ECHO_TIM_CHANNEL);
+    start_status = HAL_TIM_IC_Start_IT(&htim9, ECHO_TIM_CHANNEL);
+    if (start_status != HAL_OK)
+    {
+        wave_waiting = 0U;
+    }
+    if (interrupt_state == 0U)
+    {
+        __enable_irq();
+    }
+    if (start_status != HAL_OK)
+    {
+        return -1.0f;
+    }
+
     HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_SET);
     delay_us(15);
     HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_RESET);
@@ -58,10 +90,23 @@ float Wave_Get_Distance(void)
     }
     else
     {
-        wave_waiting = 0;
-        capture_state = 0;
-        HAL_TIM_IC_Stop_IT(&htim9, ECHO_TIM_CHANNEL);
-        distance = -1.0f;
+        interrupt_state = __get_PRIMASK();
+        __disable_irq();
+        if (wave_waiting != 0U)
+        {
+            wave_waiting = 0U;
+            capture_state = 0U;
+            (void)HAL_TIM_IC_Stop_IT(&htim9, ECHO_TIM_CHANNEL);
+        }
+        else
+        {
+            /* The falling edge arrived at the timeout boundary. */
+            distance = (float)high_time * 0.017f;
+        }
+        if (interrupt_state == 0U)
+        {
+            __enable_irq();
+        }
     }
 
     return distance;

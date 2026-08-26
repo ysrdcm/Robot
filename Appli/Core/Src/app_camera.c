@@ -99,26 +99,46 @@ void app_camera_display_pipe_start(uint8_t *display_pipe_destination, uint32_t c
 {
     app_camera_display_destination = display_pipe_destination;
     app_camera_display_capture_mode = capture_mode;
-    HAL_DCMIPP_PIPE_Start(&hdcmipp, DCMIPP_PIPE1, (uint32_t)display_pipe_destination, capture_mode);
+    if (HAL_DCMIPP_PIPE_Start(&hdcmipp, DCMIPP_PIPE1,
+                              (uint32_t)display_pipe_destination,
+                              capture_mode) != HAL_OK)
+    {
+        app_camera_recover_request = 1U;
+    }
 }
 
 void app_camera_nn_pipe_start(uint8_t *nn_pipe_destination, uint32_t capture_mode)
 {
     app_camera_nn_destination = nn_pipe_destination;
     app_camera_nn_capture_mode = capture_mode;
-    HAL_DCMIPP_PIPE_Start(&hdcmipp, DCMIPP_PIPE2, (uint32_t)nn_pipe_destination, capture_mode);
+    if (HAL_DCMIPP_PIPE_Start(&hdcmipp, DCMIPP_PIPE2,
+                              (uint32_t)nn_pipe_destination,
+                              capture_mode) != HAL_OK)
+    {
+        app_camera_recover_request = 1U;
+    }
 }
 
 void app_camera_display_pipe_set_address(uint8_t *display_pipe_destination)
 {
     app_camera_display_destination = display_pipe_destination;
-    HAL_DCMIPP_PIPE_SetMemoryAddress(&hdcmipp, DCMIPP_PIPE1, DCMIPP_MEMORY_ADDRESS_0, (uint32_t)display_pipe_destination);
+    if (HAL_DCMIPP_PIPE_SetMemoryAddress(&hdcmipp, DCMIPP_PIPE1,
+                                         DCMIPP_MEMORY_ADDRESS_0,
+                                         (uint32_t)display_pipe_destination) != HAL_OK)
+    {
+        app_camera_recover_request = 1U;
+    }
 }
 
 void app_camera_nn_pipe_set_address(uint8_t *nn_pipe_destination)
 {
     app_camera_nn_destination = nn_pipe_destination;
-    HAL_DCMIPP_PIPE_SetMemoryAddress(&hdcmipp, DCMIPP_PIPE2, DCMIPP_MEMORY_ADDRESS_0, (uint32_t)nn_pipe_destination);
+    if (HAL_DCMIPP_PIPE_SetMemoryAddress(&hdcmipp, DCMIPP_PIPE2,
+                                         DCMIPP_MEMORY_ADDRESS_0,
+                                         (uint32_t)nn_pipe_destination) != HAL_OK)
+    {
+        app_camera_recover_request = 1U;
+    }
 }
 
 uint8_t app_camera_recovery_requested(void)
@@ -130,10 +150,21 @@ HAL_StatusTypeDef app_camera_recover(void)
 {
     HAL_StatusTypeDef display_status;
     HAL_StatusTypeDef nn_status;
+    uint8_t *display_destination;
+    uint8_t *nn_destination;
+    uint32_t display_capture_mode;
+    uint32_t nn_capture_mode;
 
-    if ((app_camera_display_destination == NULL) ||
-        (app_camera_nn_destination == NULL))
+    HAL_NVIC_DisableIRQ(DCMIPP_IRQn);
+    __DMB();
+    display_destination = app_camera_display_destination;
+    nn_destination = app_camera_nn_destination;
+    display_capture_mode = app_camera_display_capture_mode;
+    nn_capture_mode = app_camera_nn_capture_mode;
+
+    if ((display_destination == NULL) || (nn_destination == NULL))
     {
+        HAL_NVIC_EnableIRQ(DCMIPP_IRQn);
         return HAL_ERROR;
     }
 
@@ -141,7 +172,6 @@ HAL_StatusTypeDef app_camera_recover(void)
      * Stop and restart outside the ISR. HAL marks an overrun
      * pipe ERROR and disables its interrupt, so it cannot self-recover.
      */
-    HAL_NVIC_DisableIRQ(DCMIPP_IRQn);
     display_status = HAL_DCMIPP_PIPE_Stop(&hdcmipp, DCMIPP_PIPE1);
     nn_status = HAL_DCMIPP_PIPE_Stop(&hdcmipp, DCMIPP_PIPE2);
 
@@ -158,12 +188,12 @@ HAL_StatusTypeDef app_camera_recover(void)
 
         display_status = HAL_DCMIPP_PIPE_Start(
             &hdcmipp, DCMIPP_PIPE1,
-            (uint32_t)app_camera_display_destination,
-            app_camera_display_capture_mode);
+            (uint32_t)display_destination,
+            display_capture_mode);
         nn_status = HAL_DCMIPP_PIPE_Start(
             &hdcmipp, DCMIPP_PIPE2,
-            (uint32_t)app_camera_nn_destination,
-            app_camera_nn_capture_mode);
+            (uint32_t)nn_destination,
+            nn_capture_mode);
         /* HAL disables these interrupt sources after a global error. */
         __HAL_DCMIPP_ENABLE_IT(
             &hdcmipp,
@@ -175,6 +205,7 @@ HAL_StatusTypeDef app_camera_recover(void)
     {
         app_camera_recover_request = 0U;
     }
+    __DMB();
     HAL_NVIC_EnableIRQ(DCMIPP_IRQn);
 
     return ((display_status == HAL_OK) && (nn_status == HAL_OK)) ?
