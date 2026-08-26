@@ -37,11 +37,6 @@
 	<!-- Linked resources are relative to the repository's current package layout. -->
 	<linkedResources>
 		<link>
-			<name>Drivers/CMSIS/system_stm32n6xx_s.c</name>
-			<type>1</type>
-			<locationURI>PARENT-1-PROJECT_LOC/Appli/Core/Src/system_stm32n6xx_s.c</locationURI>
-		</link>
-		<link>
 			<name>Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal.c</name>
 			<type>1</type>
 			<locationURI>PARENT-4-PROJECT_LOC/STM32Cube_FW_N6_V1.0.0/Drivers/STM32N6xx_HAL_Driver/Src/stm32n6xx_hal.c</locationURI>
@@ -212,69 +207,9 @@
 			<locationURI>PARENT-1-PROJECT_LOC/Model</locationURI>
 		</link>
 		<link>
-			<name>Application/User/Core/app.c</name>
-			<type>1</type>
-			<locationURI>PARENT-1-PROJECT_LOC/Appli/Core/Src/app.c</locationURI>
-		</link>
-		<link>
-			<name>Application/User/Core/app_bqueue.c</name>
-			<type>1</type>
-			<locationURI>PARENT-1-PROJECT_LOC/Appli/Core/Src/app_bqueue.c</locationURI>
-		</link>
-		<link>
-			<name>Application/User/Core/app_camera.c</name>
-			<type>1</type>
-			<locationURI>PARENT-1-PROJECT_LOC/Appli/Core/Src/app_camera.c</locationURI>
-		</link>
-		<link>
-			<name>Application/User/Core/app_cpuload.c</name>
-			<type>1</type>
-			<locationURI>PARENT-1-PROJECT_LOC/Appli/Core/Src/app_cpuload.c</locationURI>
-		</link>
-		<link>
-			<name>Application/User/Core/app_lcd.c</name>
-			<type>1</type>
-			<locationURI>PARENT-1-PROJECT_LOC/Appli/Core/Src/app_lcd.c</locationURI>
-		</link>
-		<link>
-			<name>Application/User/Core/app_postprocess.c</name>
-			<type>1</type>
-			<locationURI>PARENT-1-PROJECT_LOC/Appli/Core/Src/app_postprocess.c</locationURI>
-		</link>
-		<link>
-			<name>Application/User/Core/main.c</name>
-			<type>1</type>
-			<locationURI>PARENT-1-PROJECT_LOC/Appli/Core/Src/main.c</locationURI>
-		</link>
-		<link>
-			<name>Application/User/Core/secure_nsc.c</name>
-			<type>1</type>
-			<locationURI>PARENT-1-PROJECT_LOC/Appli/Core/Src/secure_nsc.c</locationURI>
-		</link>
-		<link>
-			<name>Application/User/Core/stm32_lcd_ex.c</name>
-			<type>1</type>
-			<locationURI>PARENT-1-PROJECT_LOC/Appli/Core/Src/stm32_lcd_ex.c</locationURI>
-		</link>
-		<link>
-			<name>Application/User/Core/stm32n6xx_hal_msp.c</name>
-			<type>1</type>
-			<locationURI>PARENT-1-PROJECT_LOC/Appli/Core/Src/stm32n6xx_hal_msp.c</locationURI>
-		</link>
-		<link>
-			<name>Application/User/Core/stm32n6xx_hal_timebase_threadx.c</name>
-			<type>1</type>
-			<locationURI>PARENT-1-PROJECT_LOC/Appli/Core/Src/stm32n6xx_hal_timebase_threadx.c</locationURI>
-		</link>
-		<link>
-			<name>Application/User/Core/stm32n6xx_it.c</name>
-			<type>1</type>
-			<locationURI>PARENT-1-PROJECT_LOC/Appli/Core/Src/stm32n6xx_it.c</locationURI>
-		</link>
-		<link>
 			<name>Drivers/BSP/Inc/HyperRAM</name>
 			<type>2</type>
-			<locationURI>PARENT-4-PROJECT_LOC/Drivers/BSP/HyperRAM</locationURI>
+			<locationURI>PARENT-1-PROJECT_LOC/Drivers/BSP/HyperRAM</locationURI>
 		</link>
 		<link>
 			<name>Drivers/BSP/Inc/LCD</name>
@@ -289,13 +224,18 @@
 		<link>
 			<name>Drivers/BSP/Inc/NORFlash</name>
 			<type>2</type>
-			<locationURI>PARENT-4-PROJECT_LOC/Drivers/BSP/NORFlash</locationURI>
+			<locationURI>PARENT-1-PROJECT_LOC/Drivers/BSP/NORFlash</locationURI>
 		</link>
 		<link>
 			<name>Drivers/BSP/Inc/UART</name>
 			<type>2</type>
 			<!-- Local UART dispatches ESP-01S and RC-100B receive callbacks. -->
 			<locationURI>PARENT-1-PROJECT_LOC/Drivers/BSP/UART</locationURI>
+		</link>
+		<link>
+			<name>Drivers/BSP/Inc/OV5640</name>
+			<type>2</type>
+			<locationURI>PARENT-1-PROJECT_LOC/Drivers/BSP/OV5640</locationURI>
 		</link>
 		<!-- Robot and ESP-01S sources linked into the CubeIDE project. -->
 		<link>
@@ -330,11 +270,6 @@
 			<locationURI>PARENT-4-PROJECT_LOC/Middlewares/AI/Lib/GCC/ARMCortexM55</locationURI>
 		</link>
 		<link>
-			<name>Middlewares/STM32_MW_CAMERA/Inc/STM32_MW_CAMERA</name>
-			<type>2</type>
-			<locationURI>PARENT-4-PROJECT_LOC/Middlewares/STM32_MW_CAMERA</locationURI>
-		</link>
-		<link>
 			<name>Middlewares/STM32_MW_ISP/Inc/evision</name>
 			<type>2</type>
 			<locationURI>PARENT-4-PROJECT_LOC/Middlewares/STM32_MW_ISP/evision/Inc</locationURI>
@@ -348,21 +283,6 @@
 			<name>Middlewares/STM32_MW_ISP/Lib/evision</name>
 			<type>2</type>
 			<locationURI>PARENT-4-PROJECT_LOC/Middlewares/STM32_MW_ISP/evision/Lib</locationURI>
-		</link>
-		<link>
-			<name>Middlewares/STM32_MW_ISP/isp/isp_algo.c</name>
-			<type>1</type>
-			<locationURI>PARENT-4-PROJECT_LOC/Middlewares/STM32_MW_ISP/isp/Src/isp_algo.c</locationURI>
-		</link>
-		<link>
-			<name>Middlewares/STM32_MW_ISP/isp/isp_core.c</name>
-			<type>1</type>
-			<locationURI>PARENT-4-PROJECT_LOC/Middlewares/STM32_MW_ISP/isp/Src/isp_core.c</locationURI>
-		</link>
-		<link>
-			<name>Middlewares/STM32_MW_ISP/isp/isp_services.c</name>
-			<type>1</type>
-			<locationURI>PARENT-4-PROJECT_LOC/Middlewares/STM32_MW_ISP/isp/Src/isp_services.c</locationURI>
 		</link>
 		<link>
 			<name>Middlewares/STM32_VISION_MODELS_PP/Inc/STM32_VISION_MODELS_PP</name>
@@ -1414,6 +1334,36 @@
 			<name>Drivers/CMSIS/DSP/Inc/DSP</name>
 			<type>2</type>
 			<locationURI>PARENT-4-PROJECT_LOC/STM32Cube_FW_N6_V1.0.0/Drivers/CMSIS/DSP/Include</locationURI>
+		</link>
+		<link>
+			<name>Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal_tim.c</name>
+			<type>1</type>
+			<locationURI>PARENT-1-PROJECT_LOC/Drivers/STM32N6xx_HAL_Driver/Src/stm32n6xx_hal_tim.c</locationURI>
+		</link>
+		<link>
+			<name>Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal_tim_ex.c</name>
+			<type>1</type>
+			<locationURI>PARENT-1-PROJECT_LOC/Drivers/STM32N6xx_HAL_Driver/Src/stm32n6xx_hal_tim_ex.c</locationURI>
+		</link>
+		<link>
+			<name>Utilities/lcd/Src/stm32_lcd.c</name>
+			<type>1</type>
+			<locationURI>PARENT-1-PROJECT_LOC/Utilities/lcd/Src/stm32_lcd.c</locationURI>
+		</link>
+		<link>
+			<name>Application/User/ThreadX/tx_initialize_low_level.S</name>
+			<type>1</type>
+			<locationURI>PARENT-1-PROJECT_LOC/Middlewares/ThreadX/tx_initialize_low_level.S</locationURI>
+		</link>
+		<link>
+			<name>Middlewares/ThreadX/Execution_Profile_Kit/tx_execution_profile.c</name>
+			<type>1</type>
+			<locationURI>PARENT-1-PROJECT_LOC/Middlewares/ThreadX/Execution_Profile_Kit/tx_execution_profile.c</locationURI>
+		</link>
+		<link>
+			<name>Middlewares/AI/Npu</name>
+			<type>2</type>
+			<locationURI>PARENT-1-PROJECT_LOC/Middlewares/AI/Npu</locationURI>
 		</link>
 	</linkedResources>
 </projectDescription>
