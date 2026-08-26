@@ -10,11 +10,10 @@
 #define O1_PORT GPIOD
 #define O1_PIN  GPIO_PIN_14
 
-/* CODEX 2026-07-27: Filter sensor glitches and bridge short gaps in the line. */
+/* Confirm a pattern before accepting it to reject single-sample glitches. */
 #define TRACK_PATTERN_CONFIRM_SAMPLES 2U
 #define TRACK_PATTERN_ALL_WHITE       0x00U
 #define TRACK_PATTERN_ALL_BLACK       0x0FU
-/* CODEX 2026-07-27: Keep the last confirmed action for up to 3000 ms on all-white. */
 #define TRACK_LINE_LOST_HOLD_MS       3000U
 
 typedef void (*Track_Action_t)(void);
@@ -64,8 +63,8 @@ static Track_Action_t Track_Get_Action(uint8_t pattern)
 
         default:
             /*
-             * CODEX 2026-07-27: Every other nonzero combination follows the
-             * requested left-turn fallback.
+             * Undefined nonzero patterns use the configured left-turn
+             * fallback.
              */
             return Car_TurnLeft;
     }
@@ -81,7 +80,7 @@ void Track_Process(void)
     uint8_t raw_pattern = Track_Read_Pattern();
 
     /*
-     * CODEX 2026-07-27: Keep the last confirmed action across a short,
+     * Keep the last confirmed action across a short,
      * continuous all-white gap, then stop using real elapsed milliseconds.
      */
     if (raw_pattern == TRACK_PATTERN_ALL_WHITE)
@@ -102,7 +101,7 @@ void Track_Process(void)
         else
         {
             /*
-             * CODEX 2026-07-27: Keep the robot stopped until a new nonzero
+             * Keep the robot stopped until a new nonzero
              * pattern passes the two-sample confirmation.
              */
             last_action = Car_Stop;
@@ -124,7 +123,7 @@ void Track_Process(void)
     if (candidate_count >= TRACK_PATTERN_CONFIRM_SAMPLES)
     {
         /*
-         * CODEX 2026-07-27: Only a two-sample-confirmed nonzero pattern
+         * Only a two-sample-confirmed nonzero pattern
          * replaces the saved action or clears the line-loss timer.
          */
         last_action = Track_Get_Action(candidate_pattern);

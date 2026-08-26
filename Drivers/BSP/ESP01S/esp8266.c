@@ -1,7 +1,7 @@
 // esp8266.c 示例
 #include "esp8266.h"
 #include "string.h"
-#include <stdio.h> /* CODEX 2026-07-20: Declare sprintf used by the legacy helper. */
+#include <stdio.h>
 #include "tx_api.h" // 需要用到 ThreadX 的延时
 
 // 发送AT指令并等待特定应答的简单封装

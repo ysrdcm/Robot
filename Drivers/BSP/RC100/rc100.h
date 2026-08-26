@@ -3,7 +3,7 @@
 
 #include "main.h"
 
-/* CODEX 2026-07-24: ROBOTIS RC-100B button bit map. */
+/* ROBOTIS RC-100B button bitmap. */
 #define RC100_BUTTON_UP       0x0001U
 #define RC100_BUTTON_DOWN     0x0002U
 #define RC100_BUTTON_LEFT     0x0004U

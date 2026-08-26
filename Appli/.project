@@ -34,7 +34,7 @@
 		<nature>org.eclipse.cdt.managedbuilder.core.managedBuildNature</nature>
 		<nature>org.eclipse.cdt.managedbuilder.core.ScannerConfigNature</nature>
 	</natures>
-	<!-- CODEX 2026-07-20: Relative link depths corrected after moving the project out of STM32CubeIDE/Appli. -->
+	<!-- Linked resources are relative to the repository's current package layout. -->
 	<linkedResources>
 		<link>
 			<name>Drivers/CMSIS/system_stm32n6xx_s.c</name>
@@ -294,10 +294,10 @@
 		<link>
 			<name>Drivers/BSP/Inc/UART</name>
 			<type>2</type>
-			<!-- CODEX 2026-07-24: Build the local UART copy that dispatches ESP-01S RX callbacks. -->
+			<!-- Local UART dispatches ESP-01S and RC-100B receive callbacks. -->
 			<locationURI>PARENT-1-PROJECT_LOC/Drivers/BSP/UART</locationURI>
 		</link>
-		<!-- CODEX 2026-07-20: Link robot and ESP-01S sources into the CubeIDE project. -->
+		<!-- Robot and ESP-01S sources linked into the CubeIDE project. -->
 		<link>
 			<name>Drivers/BSP/Inc/MOTOR</name>
 			<type>2</type>
@@ -311,7 +311,7 @@
 		<link>
 			<name>Drivers/BSP/Inc/RC100</name>
 			<type>2</type>
-			<!-- CODEX 2026-07-24: Build the local RC-100B USART1 receiver. -->
+			<!-- RC-100B USART1 receiver. -->
 			<locationURI>PARENT-1-PROJECT_LOC/Drivers/BSP/RC100</locationURI>
 		</link>
 		<link>
@@ -1397,7 +1397,7 @@
 		<link>
 			<name>Application/User/STM32_MW_CAMERA/Inc/STM32_MW_CAMERA</name>
 			<type>2</type>
-			<!-- CODEX 2026-07-20: Configuration headers now live in the local middleware tree. -->
+			<!-- Configuration headers from the local middleware tree. -->
 			<locationURI>PARENT-1-PROJECT_LOC/Middlewares/STM32_MW_CAMERA</locationURI>
 		</link>
 		<link>

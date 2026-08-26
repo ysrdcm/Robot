@@ -19,8 +19,8 @@
  */
 
 #include "uart.h"
-#include "esp8266_log.h" /* CODEX 2026-07-24: Dispatch UART4 RX interrupts to ESP-01S. */
-#include "rc100.h"       /* CODEX 2026-07-24: USART1 RX is dedicated to RC-100B. */
+#include "esp8266_log.h"
+#include "rc100.h"
 
 /* UART句柄 */
 extern UART_HandleTypeDef huart1;
@@ -109,7 +109,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 }
 #else
 /*
- * CODEX 2026-07-24: BSP_UART_RX_DISABLE applies only to the USART1 console.
+ * BSP_UART_RX_DISABLE applies only to the USART1 console.
  * UART4 must still dispatch ESP-01S receive-complete interrupts.
  */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
@@ -125,7 +125,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 }
 #endif
 
-/* CODEX 2026-07-24: Restart ESP-01S interrupt reception after UART errors. */
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1)

@@ -9,20 +9,20 @@ extern TIM_HandleTypeDef htim4;
 #define SERVO_PAN_MAX                   2500.0f
 #define SERVO_TILT_MIN                  1000.0f
 #define SERVO_TILT_MAX                  2000.0f
-/* CODEX 2026-07-26: Slower gimbal motion suppresses detector-jitter swings. */
+/* Limit each update so detector jitter cannot cause abrupt gimbal motion. */
 #define SERVO_TRACK_MAX_STEP               3.0f
 #define GIMBAL_DETECTION_HOLD_MS          300U
 
 /*
- * CODEX 2026-07-26: Camera and gimbal centers/ranges are calibrated in PWM
+ * Camera and gimbal centers/ranges are calibrated in PWM
  * microseconds. Both use decreasing PWM for the chassis-right direction.
  */
 #define CAMERA_PAN_CENTER_PWM           1500.0f
 #define CAMERA_PAN_HALF_RANGE_PWM        800.0f
 #define GIMBAL_PAN_CENTER_PWM           1500.0f
 /*
- * CODEX 2026-07-26: Reduced from 1000 after the right-end bench test showed
- * slight over-compensation. Center-camera image tracking remains unchanged.
+ * This range compensates camera yaw without changing centered-camera image
+ * tracking. Calibrate it separately for the left and right mechanical limits.
  */
 #define GIMBAL_PAN_HALF_RANGE_PWM        670.0f
 #define CAMERA_TO_GIMBAL_PAN_SIGN          1.0f
@@ -83,7 +83,7 @@ void Gimbal_Targeting_Update(float target_x, float target_y,
         }
 
         /*
-         * CODEX 2026-07-26: Preserve the image correction that is accurate
+         * Preserve the image correction that is accurate
          * with a centered camera, then add the camera's chassis-relative yaw.
          */
         camera_pan_offset =
@@ -116,7 +116,7 @@ void Gimbal_Targeting_Update(float target_x, float target_y,
              ((HAL_GetTick() - last_detect_tick) >
               GIMBAL_DETECTION_HOLD_MS))
     {
-        /* CODEX 2026-07-26: Ignore short detector dropouts before recentering. */
+        /* Ignore short detector dropouts before recentering. */
         current_pwm_pan =
             Servo_Smooth_Step(current_pwm_pan, GIMBAL_PAN_CENTER_PWM, 0.05f);
         current_pwm_tilt =

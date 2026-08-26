@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <?fileVersion 4.0.0?><cproject storage_type_id="org.eclipse.cdt.core.XmlProjectDescriptionStorage">
-	<!-- CODEX 2026-07-20: Relative include depths corrected for the current Appli project location. -->
+	<!-- Relative includes follow the current Appli project location. -->
 	<storageModule moduleId="org.eclipse.cdt.core.settings">
 		<cconfiguration id="com.st.stm32cube.ide.mcu.gnu.managedbuild.config.exe.debug.400568909">
 			<storageModule buildSystemId="org.eclipse.cdt.managedbuilder.core.configurationDataProvider" id="com.st.stm32cube.ide.mcu.gnu.managedbuild.config.exe.debug.400568909" moduleId="org.eclipse.cdt.core.settings" name="Debug">
@@ -76,10 +76,10 @@
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Drivers/BSP/Inc/LCD}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Drivers/BSP/Inc/BUS}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Drivers/BSP/Inc/UART}&quot;"/>
-									<!-- CODEX 2026-07-20: Robot and ESP-01S driver include paths. -->
+									<!-- Robot and ESP-01S driver include paths. -->
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Drivers/BSP/Inc/MOTOR}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Drivers/BSP/Inc/ESP01S}&quot;"/>
-									<!-- CODEX 2026-07-24: RC-100B receiver include path. -->
+									<!-- RC-100B receiver include path. -->
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Drivers/BSP/Inc/RC100}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Drivers/CMSIS/DSP/Inc/DSP}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Middlewares/ThreadX/Inc/Ports}&quot;"/>
@@ -224,10 +224,10 @@
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Drivers/BSP/Inc/LCD}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Drivers/BSP/Inc/BUS}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Drivers/BSP/Inc/UART}&quot;"/>
-									<!-- CODEX 2026-07-20: Robot and ESP-01S driver include paths. -->
+									<!-- Robot and ESP-01S driver include paths. -->
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Drivers/BSP/Inc/MOTOR}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Drivers/BSP/Inc/ESP01S}&quot;"/>
-									<!-- CODEX 2026-07-24: RC-100B receiver include path. -->
+									<!-- RC-100B receiver include path. -->
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Drivers/BSP/Inc/RC100}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Drivers/CMSIS/DSP/Inc/DSP}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Middlewares/ThreadX/Inc/Ports}&quot;"/>

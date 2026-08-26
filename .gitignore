@@ -3,7 +3,7 @@ Model/st_ai_ws/
 Model/*.xSPI2.bin
 Model/*.hex
 
-# CODEX 2026-08-20: Keep generated STM32CubeIDE build output out of Git.
+# Generated STM32CubeIDE build output.
 **/Debug/
 **/Release/
 *.o
@@ -26,7 +26,7 @@ Model/*.hex
 *.bak
 *~
 
-# CODEX 2026-08-20: Unused optional middleware shipped with the board package.
+# Optional middleware not used by this application.
 /Middlewares/ATKNCR/
 /Middlewares/FATFS/
 /Middlewares/MALLOC/

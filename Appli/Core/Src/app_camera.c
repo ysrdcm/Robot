@@ -37,7 +37,7 @@ static void (*app_camera_display_pipe_vsync_user_cb)(void) = NULL;
 static void (*app_camera_display_pipe_frame_user_cb)(void) = NULL;
 static void (*app_camera_nn_pipe_vsync_user_cb)(void) = NULL;
 static void (*app_camera_nn_pipe_frame_user_cb)(void) = NULL;
-/* CODEX 2026-07-26: Retain active buffers/config for thread-context recovery. */
+/* Active buffers and modes are retained for thread-context recovery. */
 static volatile uint8_t app_camera_recover_request;
 static uint8_t *app_camera_display_destination;
 static uint8_t *app_camera_nn_destination;
@@ -46,17 +46,15 @@ static uint32_t app_camera_nn_capture_mode;
 
 void app_camera_init(void (*display_pipe_vsync_cb)(void), void (*display_pipe_frame_cb)(void), void (*nn_pipe_vsync_cb)(void), void (*nn_pipe_frame_cb)(void))
 {
-    // 【新增】：定义并行接口专属配置结构体
     DCMIPP_ParallelConfTypeDef pParallelConfig = {0};
 
     extern HAL_StatusTypeDef MX_DCMIPP_ClockConfig(DCMIPP_HandleTypeDef *hdcmipp);
     MX_DCMIPP_ClockConfig(&hdcmipp);
 
-    // 1. 初始化基础句柄
     hdcmipp.Instance = DCMIPP;
     HAL_DCMIPP_Init(&hdcmipp);
 
-    // 2. 【核心修复】：使用 N6 专属的 PARALLEL 结构体配置 OV5640 参数
+    /* OV5640 uses the STM32N6 eight-bit parallel DCMIPP interface. */
     pParallelConfig.PCKPolarity = DCMIPP_PCKPOLARITY_RISING ;
     pParallelConfig.HSPolarity = DCMIPP_HSPOLARITY_LOW ;
     pParallelConfig.VSPolarity = DCMIPP_VSPOLARITY_LOW ;
@@ -66,7 +64,6 @@ void app_camera_init(void (*display_pipe_vsync_cb)(void), void (*display_pipe_fr
     pParallelConfig.SwapCycles = DCMIPP_SWAPCYCLES_ENABLE;
     pParallelConfig.SynchroMode = DCMIPP_SYNCHRO_HARDWARE;
 
-    // 3. 将配置应用到底层硬件
     HAL_DCMIPP_PARALLEL_SetConfig(&hdcmipp, &pParallelConfig);
 
     while (ov5640_init()) {
@@ -150,7 +147,7 @@ HAL_StatusTypeDef app_camera_recover(void)
     }
 
     /*
-     * CODEX 2026-07-26: Stop/restart outside the ISR. HAL marks an overrun
+     * Stop and restart outside the ISR. HAL marks an overrun
      * pipe ERROR and disables its interrupt, so it cannot self-recover.
      */
     HAL_NVIC_DisableIRQ(DCMIPP_IRQn);
@@ -176,7 +173,7 @@ HAL_StatusTypeDef app_camera_recover(void)
             &hdcmipp, DCMIPP_PIPE2,
             (uint32_t)app_camera_nn_destination,
             app_camera_nn_capture_mode);
-        /* CODEX 2026-07-26: HAL disables these sources after a global error. */
+        /* HAL disables these interrupt sources after a global error. */
         __HAL_DCMIPP_ENABLE_IT(
             &hdcmipp,
             DCMIPP_IT_AXI_TRANSFER_ERROR |
@@ -312,7 +309,7 @@ void HAL_DCMIPP_PIPE_ErrorCallback(DCMIPP_HandleTypeDef *hdcmipp,
     (void)Pipe;
     if (hdcmipp->Instance == DCMIPP)
     {
-        /* CODEX 2026-07-26: Defer blocking recovery to the control thread. */
+        /* Blocking recovery is deferred to the control thread. */
         app_camera_recover_request = 1U;
     }
 }
@@ -321,7 +318,7 @@ void HAL_DCMIPP_ErrorCallback(DCMIPP_HandleTypeDef *hdcmipp)
 {
     if (hdcmipp->Instance == DCMIPP)
     {
-        /* CODEX 2026-07-26: Covers parallel-sync and AXI transfer errors. */
+        /* Covers parallel-sync and AXI transfer errors. */
         app_camera_recover_request = 1U;
     }
 }

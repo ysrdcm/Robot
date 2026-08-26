@@ -2,7 +2,7 @@
 
 extern UART_HandleTypeDef huart1;
 
-/* CODEX 2026-07-24: USART1 receives the six-byte RC-100B packet at 57600 8N1. */
+/* RC-100B packets contain a two-byte header and two complemented data bytes. */
 static uint8_t rc100_frame[6];
 static uint8_t rc100_frame_index;
 static volatile uint16_t rc100_buttons;
@@ -75,7 +75,7 @@ void RC100_Init(void)
     rc100_has_packet = 0U;
 
     /*
-     * CODEX 2026-07-24: Receive directly from RXFNE instead of depending on
+     * Receive directly from RXFNE instead of depending on
      * HAL's one-byte asynchronous state machine and callback dispatch.
      */
     __HAL_UART_DISABLE_IT(&huart1, UART_IT_RXFNE);
@@ -102,7 +102,7 @@ void RC100_UART_IRQHandler(void)
 
     if (error_flags != 0U)
     {
-        /* CODEX 2026-07-24: Clear line errors and restart packet framing. */
+        /* A line error invalidates the partially assembled packet. */
         rc100_uart_error_count++;
         WRITE_REG(huart1.Instance->ICR,
                   USART_ICR_PECF | USART_ICR_FECF |
@@ -137,7 +137,7 @@ void RC100_UART_ErrorCallback(UART_HandleTypeDef *huart)
         return;
     }
 
-    /* CODEX 2026-07-24: Resynchronize after noise or electrical contention. */
+    /* Resynchronize after noise or electrical contention. */
     rc100_uart_error_count++;
     __HAL_UART_CLEAR_PEFLAG(huart);
     __HAL_UART_CLEAR_FEFLAG(huart);
@@ -156,7 +156,7 @@ void RC100_GetState(rc100_state_t *state)
         return;
     }
 
-    /* CODEX 2026-07-24: Copy the ISR-owned state as one coherent snapshot. */
+    /* Copy the ISR-owned state atomically. */
     interrupt_state = __get_PRIMASK();
     __disable_irq();
     state->buttons = rc100_buttons;

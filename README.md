@@ -1,10 +1,6 @@
-<!-- CODEX 2026-08-26: Added the initial repository overview from the current firmware and the earlier project document. -->
-
 # 基于 STM32N647 的边缘 AI 巡防机器人
 
 本项目是一套运行在正点原子 STM32N647 开发板上的四轮巡防机器人固件。机器人使用 OV5640 获取图像，通过 STM32N6 的 NPU 在端侧完成人体检测，并结合循迹、超声波避障、舵机云台、人工遥控和 ESP-01S 事件页面，实现自动巡防与人工接管。
-
-> 仓库中的源码是当前功能的唯一准确信息来源。早期设计文档《基于边缘 AI 与多传感融合的主动防御型巡防机器人》仅作为项目背景参考，其中部分参数、流程和实验数据已经过时。
 
 ## 主要功能
 

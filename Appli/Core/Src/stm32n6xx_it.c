@@ -23,7 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "cmw_camera.h"
-#include "rc100.h" /* CODEX 2026-07-24: Direct USART1 RXFNE handler. */
+#include "rc100.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -230,7 +230,7 @@ void TIM9_IRQHandler(void)
   */
 void USART1_IRQHandler(void)
 {
-  /* CODEX 2026-07-24: Read BT-410 RXFNE directly for deterministic reception. */
+  /* Drain BT-410 bytes directly from RXFNE. */
   RC100_UART_IRQHandler();
 }
 

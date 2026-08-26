@@ -865,7 +865,7 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  /* CODEX 2026-07-24: BT-410 factory UART rate; debug TX now also uses 57600. */
+  /* BT-410 factory UART configuration. */
   huart1.Init.BaudRate = 57600;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
@@ -1328,44 +1328,15 @@ static VOID main_thread_entry(ULONG id)
   HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_2);
   __HAL_TIM_MOE_ENABLE(&htim8);
 
-  // 顺便启动 TIM4 的通道 3 和 4 (用于你的两个舵机)
+  /* TIM4 drives the two-axis gimbal; TIM15 drives the camera servo. */
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
   HAL_TIM_PWM_Start(&htim15, TIM_CHANNEL_1);
 
-  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
-  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
+  Wave_Init();
+  beep_init();
 
-  // 👇==== 必须添加以下几行，否则必卡死 ====👇
-  Wave_Init(); // 必须初始化！否则超声波测距函数会无限死循环！
-  beep_init(); // 初始化蜂鸣器，防止上电乱叫
-
-  app_run(); //暂时屏蔽AI
-
-  // 在这里写一个死循环，专心测试
-//  Wave_Init(); // 初始化超声波
-//  while(1)
-//  {
-//      float distance = Wave_Get_Distance();
-//
-//      // 如果距离有效，且小于 20 cm
-//      if(distance > 0 && distance < 20.0f)
-//      {
-//          Car_Stop();     // 紧急刹车
-//          HAL_Delay(500); // 停顿观察
-//          Car_TurnLeft(); // 向左转头避障
-//          HAL_Delay(400); // 转 0.4 秒 (具体时间看你车速)
-//          Car_Stop();
-//      }
-//      else
-//      {
-//          // 前方安全，继续直行
-//          Car_Forward();
-//      }
-//
-//      // 控制测距频率，大约 10Hz (100ms 一次)。超声波不能测太快，否则会收到上次的回波干扰
-//      HAL_Delay(100);
-//  }
+  app_run();
 }
 
 //#ifdef DEBUG

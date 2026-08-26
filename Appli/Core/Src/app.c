@@ -41,7 +41,7 @@
 #include "esp8266_log.h"
 #include "rc100.h"
 
-extern TIM_HandleTypeDef htim15;  //nihao
+extern TIM_HandleTypeDef htim15;
 
 static TX_MUTEX ai_data_lock;
 static uint8_t  ai_person_detected = 0;
@@ -55,28 +55,25 @@ static uint16_t raw_loss_confirm_cnt = 0;   // 连续丢失目标的帧计数器
 static float    smooth_w = 0;
 static float    smooth_h = 0;
 
-/* CODEX 2026-07-16: Robot-control thresholds added in this pass. */
+/* Robot control and sensor timing. */
 #define PERSON_CLASS_INDEX                 0
 #define ULTRASONIC_SAMPLE_PERIOD_MS        60U
-/* CODEX 2026-07-24: RC-100B manual-control safety and servo limits. */
 #define RC100_LINK_TIMEOUT_MS              500U
 #define MANUAL_OBSTACLE_STOP_CM            20.0f
 #define CAMERA_SERVO_PWM_MIN               700.0f
 #define CAMERA_SERVO_PWM_MAX               2300.0f
 #define CAMERA_SERVO_UPDATE_PERIOD_MS      20U
 #define CAMERA_SERVO_MANUAL_STEP           10.0f
-/* CODEX 2026-07-26: Stable visual-servo limits for automatic camera pan. */
 #define CAMERA_SERVO_AUTO_DEADBAND          0.06f
-/* CODEX 2026-07-27: Increase all camera-pan speeds slightly while retaining the fixed cadence. */
 #define CAMERA_SERVO_AUTO_GAIN             24.0f
 #define CAMERA_SERVO_AUTO_MAX_STEP          7.5f
 #define CAMERA_SERVO_SCAN_STEP              6.0f
 #define SERVO_DETECTION_HOLD_MS             300U
-/* CODEX 2026-07-26: DCMIPP frame watchdog and bounded recovery retry. */
+/* DCMIPP watchdog timing; recovery runs outside the interrupt handler. */
 #define CAMERA_FRAME_TIMEOUT_MS            2000U
 #define CAMERA_RECOVERY_RETRY_MS           1500U
 
-/* CODEX 2026-07-20: Event snapshot settings. BMP avoids treating raw RGB as JPEG. */
+/* Event snapshots use BMP because the inference frame is raw RGB888. */
 #define PERSON_CONFIRM_FRAMES              4U
 #define PERSON_LOSS_FRAMES                 8U
 #define SNAPSHOT_WIDTH                     (NN_WIDTH / 2U)
@@ -84,7 +81,7 @@ static float    smooth_h = 0;
 #define SNAPSHOT_ROW_BYTES                 (((SNAPSHOT_WIDTH * 3U) + 3U) & ~3U)
 #define SNAPSHOT_HEADER_BYTES              54U
 #define SNAPSHOT_BMP_SIZE                  (SNAPSHOT_HEADER_BYTES + (SNAPSHOT_ROW_BYTES * SNAPSHOT_HEIGHT))
-/* CODEX 2026-07-24: Keep HTTP buffers bounded; the image is served separately. */
+/* The image is served separately so HTTP buffers stay bounded. */
 #define WIFI_HTTP_REQUEST_SIZE             1024U
 #define WIFI_PAGE_BUFFER_SIZE              4096U
 #define WIFI_IPD_HEADER_SIZE               96U
@@ -97,7 +94,7 @@ typedef enum {
     STATE_COMBAT     // 战斗（激光开火）
 } RobotState_t;
 
-// 新增控制线程
+/* Robot control thread. */
 static TX_THREAD ctrl_thread;
 static UCHAR ctrl_thread_stack[2048];
 static VOID ctrl_thread_entry(ULONG id);
@@ -119,7 +116,6 @@ typedef struct {
 } app_display_t;
 
 static TX_SEMAPHORE isp_semaphore;
-/* CODEX 2026-07-24: Expose remote mode to the LCD diagnostics layer. */
 static volatile uint8_t rc100_manual_mode_display;
 
 static void app_camera_display_pipe_vsync_cb(void);
@@ -159,14 +155,11 @@ static app_cpuload_t cpuload;
 // =================================================
 // 声明 WiFi 线程
 static TX_THREAD wifi_thread;
-/* CODEX 2026-07-20: HTTP formatting and AT parsing need more than the old 2 KB stack. */
+/* HTTP formatting and AT parsing require more stack than control tasks. */
 static UCHAR wifi_thread_stack[4096];
 static VOID wifi_thread_entry(ULONG id);
 
-// 用于通知 WiFi 线程“抓拍完成，开始上传”的信号量
-
-// 图片缓存区 (存放置信度最高的一帧)
-/* CODEX 2026-07-20: Keep each thumbnail paired with its NN output queue slot. */
+/* Each thumbnail remains paired with its inference result queue slot. */
 static uint8_t nn_snapshot_buffers[2][SNAPSHOT_BMP_SIZE]
     __attribute__((aligned(32))) __attribute__((section(".EXTRAM")));
 static uint8_t event_best_image[SNAPSHOT_BMP_SIZE]
@@ -175,7 +168,7 @@ static uint8_t latest_event_image[SNAPSHOT_BMP_SIZE]
     __attribute__((aligned(32))) __attribute__((section(".EXTRAM")));
 static uint8_t wifi_tx_image[SNAPSHOT_BMP_SIZE]
     __attribute__((aligned(32))) __attribute__((section(".EXTRAM")));
-/* CODEX 2026-07-24: Shared page buffer keeps the Wi-Fi thread stack small. */
+/* Shared buffers keep large HTTP and image data off the thread stack. */
 static uint8_t wifi_page_buffer[WIFI_PAGE_BUFFER_SIZE]
     __attribute__((aligned(32))) __attribute__((section(".EXTRAM")));
 static TX_MUTEX snapshot_lock;
@@ -186,7 +179,7 @@ static uint32_t latest_event_id = 0;
 static uint8_t person_event_active = 0;
 // =================================================
 
-/* CODEX 2026-07-20: Build a small browser-readable BMP from the exact RGB888 NN frame. */
+/* Build a browser-readable thumbnail from the exact RGB888 inference frame. */
 static void snapshot_write_u16(uint8_t *dst, uint16_t value)
 {
     dst[0] = (uint8_t)value;
@@ -259,7 +252,7 @@ static void snapshot_publish_event(void)
     tx_mutex_put(&snapshot_lock);
 }
 
-/* CODEX 2026-07-24: Parse one complete +IPD frame using its declared payload length. */
+/* Parse one complete +IPD frame using its declared payload length. */
 static uint8_t wifi_read_ipd_packet(uint8_t *link_id,
                                     char *request,
                                     uint32_t request_capacity,
@@ -426,7 +419,7 @@ static uint32_t wifi_build_event_page(void)
         return page_length + (uint32_t)written;
     }
 
-    /* CODEX 2026-07-24: Avoid Base64's 33% overhead and let the page render first. */
+    /* A separate request avoids Base64 overhead and lets the page render first. */
     written = snprintf((char *)&wifi_page_buffer[page_length],
                        WIFI_PAGE_BUFFER_SIZE - page_length,
                        "<figure><img alt=\"&#20107;&#20214;&#22270;&#20687;\" "
@@ -442,16 +435,14 @@ static uint32_t wifi_build_event_page(void)
     return page_length + (uint32_t)written;
 }
 
-/* CODEX 2026-07-24: Shared position supports auto tracking and manual slow jog. */
 static float camera_servo_pwm = 1500.0f;
-/* CODEX 2026-07-27: Update the SG90 at a fixed 20 ms cadence. */
 static uint32_t camera_servo_last_update_tick;
 
 static void Camera_Servo_Manual_Update(int8_t direction)
 {
     uint32_t now = HAL_GetTick();
 
-    /* CODEX 2026-07-27: Decouple servo speed from the variable control-loop rate. */
+    /* Fixed timing makes servo speed independent of control-loop load. */
     if ((now - camera_servo_last_update_tick) <
         CAMERA_SERVO_UPDATE_PERIOD_MS)
     {
@@ -493,7 +484,7 @@ void Camera_Servo_Update(float target_x, uint8_t is_tracking)
         last_tracking_tick = now;
     }
 
-    /* CODEX 2026-07-27: Keep scan and tracking motion on a steady time base. */
+    /* Scan and tracking share a steady time base. */
     if ((now - camera_servo_last_update_tick) <
         CAMERA_SERVO_UPDATE_PERIOD_MS)
     {
@@ -514,7 +505,7 @@ void Camera_Servo_Update(float target_x, uint8_t is_tracking)
 
         // 3. 减小硬件逼近系数：从 0.15f 降到 0.06f，让舵机更温柔、更平滑地滑向目标点
         /*
-         * CODEX 2026-07-26: Incremental control holds the current angle when
+         * Incremental control holds the current angle when
          * the person is centered instead of repeatedly commanding 1500 us.
          */
         if (fabsf(error) > CAMERA_SERVO_AUTO_DEADBAND)
@@ -545,7 +536,7 @@ void Camera_Servo_Update(float target_x, uint8_t is_tracking)
         }
         filtered_target_x = 0.5f; // 重置历史值
     }
-    /* CODEX 2026-07-26: Clamp both incremental tracking and scan motion. */
+    /* Clamp tracking and scan motion to the SG90 range. */
     if (camera_servo_pwm > CAMERA_SERVO_PWM_MAX)
     {
         camera_servo_pwm = CAMERA_SERVO_PWM_MAX;
@@ -557,7 +548,7 @@ void Camera_Servo_Update(float target_x, uint8_t is_tracking)
     __HAL_TIM_SET_COMPARE(&htim15, TIM_CHANNEL_1, (uint32_t)camera_servo_pwm);
 }
 
-/* CODEX 2026-07-24: Apply RC-100B direction bits with conflict and obstacle checks. */
+/* Resolve conflicting direction buttons and enforce the forward obstacle stop. */
 static void Manual_Drive_Update(uint16_t buttons, float distance_cm)
 {
     uint16_t direction = buttons & (RC100_BUTTON_UP | RC100_BUTTON_DOWN |
@@ -618,7 +609,7 @@ static VOID ctrl_thread_entry(ULONG id)
     uint32_t state_start_time = 0;
     float    lock_width = 0;
     float    lock_height = 0;
-    /* CODEX 2026-07-16: Cache ultrasonic readings so HC-SR04 is not retriggered every control tick. */
+    /* Cache distance because HC-SR04 needs a quiet interval between triggers. */
     uint32_t last_ultrasonic_tick = 0;
     float    dist = -1.0f;
     uint32_t last_camera_recovery_attempt = 0U;
@@ -637,7 +628,7 @@ static VOID ctrl_thread_entry(ULONG id)
              CAMERA_RECOVERY_RETRY_MS))
         {
             /*
-             * CODEX 2026-07-26: Recover a stalled DCMIPP pipeline in thread
+             * Recover a stalled DCMIPP pipeline in thread
              * context. Do not let stale AI coordinates keep steering outputs.
              */
             last_camera_recovery_attempt = now;
@@ -661,7 +652,6 @@ static VOID ctrl_thread_entry(ULONG id)
             continue;
         }
 
-        /* CODEX 2026-07-16: HC-SR04 needs a quiet interval between trigger pulses. */
         if ((now - last_ultrasonic_tick) >= ULTRASONIC_SAMPLE_PERIOD_MS)
         {
             dist = Wave_Get_Distance();
@@ -680,7 +670,7 @@ static VOID ctrl_thread_entry(ULONG id)
         tx_mutex_put(&ai_data_lock);
 
         // 2. 无论什么状态，只要有目标，云台和摄像头就要跟踪
-        /* CODEX 2026-07-24: Manual mode has priority; gimbal tracking remains automatic. */
+        /* Manual drive has priority, while the gimbal continues AI tracking. */
         {
             rc100_state_t remote_state;
             uint16_t remote_buttons = 0U;
@@ -697,12 +687,12 @@ static VOID ctrl_thread_entry(ULONG id)
             mode_buttons = remote_buttons & (RC100_BUTTON_5 | RC100_BUTTON_6);
             if (mode_buttons == 0U)
             {
-                /* CODEX 2026-07-24: A release packet rearms the next mode change. */
+                /* Require a release packet before accepting another mode change. */
                 mode_button_armed = 1U;
             }
 
             /*
-             * CODEX 2026-07-26: Add camera yaw to the existing image tracking
+             * Add camera yaw to the existing image tracking
              * correction so the gimbal targets in chassis coordinates.
              */
             Gimbal_Targeting_Update(p_x, p_y, p_det, camera_servo_pwm);
@@ -712,7 +702,7 @@ static VOID ctrl_thread_entry(ULONG id)
                 ((remote_buttons & RC100_BUTTON_6) != 0U))
             {
                 /*
-                 * CODEX 2026-07-24: Treat mechanically combined 5+6 as one
+                 * Treat mechanically combined 5+6 as one
                  * press and wait for release before another mode transition.
                  */
                 mode_button_armed = 0U;
@@ -730,7 +720,7 @@ static VOID ctrl_thread_entry(ULONG id)
                 (manual_mode != 0U) &&
                 ((remote_buttons & RC100_BUTTON_5) != 0U))
             {
-                /* CODEX 2026-07-24: Stop outputs before resetting autonomous state. */
+                /* Stop manual outputs before resuming autonomous patrol. */
                 mode_button_armed = 0U;
                 Car_Stop();
                 Laser_Fire(0U);
@@ -908,8 +898,6 @@ static VOID ctrl_thread_entry(ULONG id)
                         BEEP(0);
                         state = STATE_COMBAT;
                     }
-                    // 👆==================================================👆
-
                 }
                 break;
 
@@ -935,16 +923,16 @@ static VOID wifi_thread_entry(ULONG id)
     uint8_t init_status;
     char request[WIFI_HTTP_REQUEST_SIZE];
 
-    /* CODEX 2026-07-24: Start UART4 interrupt reception before resetting ESP-01S. */
+    /* Start reception before reset so the ESP8266 boot response is captured. */
     ESP8266_Log_UART_Start();
 
-    /* CODEX 2026-07-24: Use PQ4 to recover even when the AT firmware is unresponsive. */
+    /* PQ4 provides recovery even when AT firmware is unresponsive. */
     do
     {
         HAL_GPIO_WritePin(GPIOQ, GPIO_PIN_4, GPIO_PIN_RESET);
         tx_thread_sleep(20);
         HAL_GPIO_WritePin(GPIOQ, GPIO_PIN_4, GPIO_PIN_SET);
-        /* CODEX 2026-07-24: Allow the AT firmware to finish booting before synchronization. */
+        /* Wait for AT firmware startup before synchronization. */
         tx_thread_sleep(1000);
         ESP8266_Log_UART_Flush();
 
@@ -969,7 +957,7 @@ static VOID wifi_thread_entry(ULONG id)
             continue;
         }
 
-        /* CODEX 2026-07-24: Route only after the complete declared HTTP payload is stored. */
+        /* Route only after the complete declared HTTP payload is stored. */
         if (strstr(request, "GET /latest.bmp") != NULL)
         {
             static const char no_event[] =
@@ -1001,7 +989,7 @@ static VOID wifi_thread_entry(ULONG id)
         }
         else if (strstr(request, "GET /favicon.ico ") != NULL)
         {
-            /* CODEX 2026-07-24: A data favicon is used, but answer legacy browser requests. */
+            /* Some browsers request a favicon despite the embedded data icon. */
             printf("ESP HTTP GET /favicon.ico\r\n");
             (void)ESP8266_Log_Send_Response(link_id, "image/x-icon", NULL, 0U);
         }
@@ -1056,14 +1044,11 @@ void app_run(void)
     tx_semaphore_create(&isp_semaphore, NULL, 0);
     tx_semaphore_create(&display.update, NULL, 0);
     tx_mutex_create(&display.lock, NULL, TX_INHERIT);
-    /* CODEX 2026-07-20: Protect the published event while ESP-01S is serving it. */
+    /* Protect event data while the Wi-Fi thread serves it. */
     tx_mutex_create(&snapshot_lock, "Snapshot Lock", TX_INHERIT);
 
-    // 👇============= 新增：初始化AI数据锁 =============👇
     tx_mutex_create(&ai_data_lock, "AI Lock", TX_INHERIT);
-    /* CODEX 2026-07-24: Start interrupt-driven RC-100B reception on USART1. */
     RC100_Init();
-    // 👆===============================================👆
 
     camera_display_last_frame_tick = HAL_GetTick();
     camera_nn_last_frame_tick = camera_display_last_frame_tick;
@@ -1074,11 +1059,9 @@ void app_run(void)
     tx_thread_create(&dp_thread, "DP Thread", dp_thread_entry, 0, dp_thread_stack, sizeof(dp_thread_stack), TX_MAX_PRIORITIES - 2, TX_MAX_PRIORITIES - 2, 10, TX_AUTO_START);
     tx_thread_create(&isp_thread, "ISP Thread", isp_thread_entry, 0, isp_thread_stack, sizeof(isp_thread_stack), TX_MAX_PRIORITIES - 4, TX_MAX_PRIORITIES - 4, 10, TX_AUTO_START);
 
-    // 👇============= 新增：创建并启动控制线程 =============👇
-    // 优先级设为 TX_MAX_PRIORITIES - 2 (和 PP Thread 平级，确保响应迅速)
+    /* Control shares post-processing priority to keep actuator response timely. */
     tx_thread_create(&ctrl_thread, "Ctrl Thread", ctrl_thread_entry, 0, ctrl_thread_stack, sizeof(ctrl_thread_stack), TX_MAX_PRIORITIES - 2, TX_MAX_PRIORITIES - 2, 10, TX_AUTO_START);
     tx_thread_create(&wifi_thread, "WiFi Thread", wifi_thread_entry, 0, wifi_thread_stack, sizeof(wifi_thread_stack), TX_MAX_PRIORITIES - 1, TX_MAX_PRIORITIES - 1, 10, TX_AUTO_START);
-    // 👆==================================================👆
 }
 
 static void app_camera_display_pipe_vsync_cb(void)
@@ -1143,7 +1126,7 @@ static VOID nn_thread_entry(ULONG id)
         LL_ATON_RT_Main(&NN_Instance_Default);
         inf_ms = HAL_GetTick() - time_stamp;
 
-        /* CODEX 2026-07-20: Pair this inference result with its exact camera frame. */
+        /* Pair the inference result with the exact frame used by the NPU. */
         {
             uint8_t *snapshot = snapshot_for_output_buffer(output_buffer);
             if (snapshot != NULL)
@@ -1191,12 +1174,10 @@ static VOID pp_thread_entry(ULONG id)
         tx_mutex_put(&display.lock);
 
 
-        // ---------- 👇 修改后的核心数据传递区 👇 ----------
-        // 拿互斥锁，安全地将AI数据写入全局变量，供控制线程(ctrl_thread)决策使用
+        /* Publish detection state atomically for the control thread. */
         tx_mutex_get(&ai_data_lock, TX_WAIT_FOREVER);
 
-        // 提高基础置信度到 0.25f，并提取人体感知结果
-        /* CODEX 2026-07-16: Pick an actual person target instead of assuming pOutBuff[0] is a person. */
+        /* Select the highest-confidence person rather than assuming box zero. */
         od_pp_outBuffer_t *person = NULL;
         float best_person_conf = 0.0f;
         for (i = 0; (pp_output.pOutBuff != NULL) && (i < pp_output.nb_detect); i++)
@@ -1213,9 +1194,7 @@ static VOID pp_thread_entry(ULONG id)
 
         if (person != NULL)
         {
-            // 获取检测到的第一个目标
-
-            /* CODEX 2026-07-20: Retain only the highest-confidence frame in this event. */
+            /* Retain only the highest-confidence frame from the active event. */
             if ((raw_detect_confirm_cnt == 0U) && (person_event_active == 0U))
             {
                 event_best_confidence = -1.0f;
@@ -1230,44 +1209,38 @@ static VOID pp_thread_entry(ULONG id)
                 }
             }
 
-            raw_loss_confirm_cnt = 0; // 既然看到了人，丢失计数器立刻清零
+            raw_loss_confirm_cnt = 0;
 
-            // 1. 解决椅子瞬间误检：必须连续 4 帧都看到目标，才真正触发系统响应
+            /* Require consecutive detections before the control state sees a person. */
             if (raw_detect_confirm_cnt < PERSON_CONFIRM_FRAMES) {
                 raw_detect_confirm_cnt++;
             }
 
-            // 只有当连续4帧都确认是人时，才允许修改控制变量
             if (raw_detect_confirm_cnt >= PERSON_CONFIRM_FRAMES)
             {
                 person_event_active = 1U;
-                ai_person_detected = 1;              // 标志位锁定为：检测到人
-                ai_person_x = person->x_center;      // X坐标直接使用当前帧供云台追踪
-                ai_person_y = person->y_center;      // Y坐标直接使用当前帧供云台追踪
+                ai_person_detected = 1;
+                ai_person_x = person->x_center;
+                ai_person_y = person->y_center;
 
-                // 2. 解决检测框忽大忽小：使用低通滑动滤波器平滑尺寸
+                /* Smooth box size before using it for approach detection. */
                 if (smooth_w == 0) {
-                    // 第一次锁定目标时，赋予初值
                     smooth_w = person->width;
                     smooth_h = person->height;
                 } else {
-                    // 后续检测：老尺寸占 85% 权重，新尺寸占 15% 权重
-                    // 彻底抹平一瞬间框变大的噪点
                     smooth_w = smooth_w * 0.85f + person->width * 0.15f;
                     smooth_h = smooth_h * 0.85f + person->height * 0.15f;
                 }
 
-                // 将平滑后的稳如泰山的尺寸，交给全局变量
                 ai_person_w = smooth_w;
                 ai_person_h = smooth_h;
             }
         }
         else
         {
-            // 这一帧什么都没看到，或者置信度太低（噪点）
-            raw_detect_confirm_cnt = 0; // 连续检测计数器立刻被破坏、清零
+            raw_detect_confirm_cnt = 0;
 
-            // 3. 目标丢失消抖：必须连续 8 帧都没看到人，才认为人彻底离开了
+            /* End an event only after consecutive missed detections. */
             if (person_event_active == 1U) {
                 raw_loss_confirm_cnt++;
                 if (raw_loss_confirm_cnt >= PERSON_LOSS_FRAMES) {
@@ -1278,7 +1251,7 @@ static VOID pp_thread_entry(ULONG id)
                     person_event_active = 0U;
                     event_best_confidence = -1.0f;
                     ai_person_detected = 0;
-                    smooth_w = 0; // 目标彻底消失，平滑尺寸也要归零重置
+                    smooth_w = 0;
                     smooth_h = 0;
                 }
             }
@@ -1290,7 +1263,6 @@ static VOID pp_thread_entry(ULONG id)
         }
 
         tx_mutex_put(&ai_data_lock);
-        // ---------- 👆 数据传递区结束 👆 ----------
 
         app_bqueue_put_free(&nn_output_queue);
         tx_semaphore_ceiling_put(&display.update, 1);
@@ -1371,7 +1343,7 @@ static void app_display_detection(od_pp_outBuffer_t *detect)
     int32_t h;
 
     /*
-     * CODEX 2026-07-27: Reject malformed, non-person and degenerate boxes.
+     * Reject malformed, non-person and degenerate boxes.
      * A zero-sized rectangle underflows inside UTIL_LCD_DrawRect() and can
      * briefly draw a long green line outside the intended detection box.
      */
@@ -1425,7 +1397,7 @@ static void app_display_network_output(app_display_info_t *display_info)
     app_cpuload_get_info(&cpuload, NULL, &cpuload_one_second, NULL);
 
     /*
-     * CODEX 2026-07-24: On-screen RC-100 diagnostics replace unavailable
+     * On-screen RC-100 diagnostics replace unavailable
      * USART1 logging. Counts let field tests distinguish wiring from framing.
      */
     RC100_GetState(&remote_state);
@@ -1466,7 +1438,6 @@ static void app_display_network_output(app_display_info_t *display_info)
                        (unsigned long)remote_state.invalid_frame_count,
                        (unsigned long)remote_state.uart_error_count,
                        (unsigned long)remote_state.receive_start_failure_count);
-    /* CODEX 2026-07-26: Show successful camera-pipeline recoveries. */
     UTIL_LCDEx_PrintfAt(8, LINE(2), LEFT_MODE,
                        "CAM REC:%lu",
                        (unsigned long)camera_recovery_count);

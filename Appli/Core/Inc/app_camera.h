@@ -29,7 +29,7 @@ void app_camera_display_pipe_set_address(uint8_t *display_pipe_destination);
 void app_camera_nn_pipe_start(uint8_t *nn_pipe_destination, uint32_t capture_mode);
 void app_camera_nn_pipe_set_address(uint8_t *nn_pipe_destination);
 void app_camera_isp_update(void);
-/* CODEX 2026-07-26: Recover stalled/error DCMIPP display and NN pipes. */
+/* Recover stalled display and inference DCMIPP pipes in thread context. */
 uint8_t app_camera_recovery_requested(void);
 HAL_StatusTypeDef app_camera_recover(void);
 

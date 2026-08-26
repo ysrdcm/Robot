@@ -256,7 +256,7 @@ stai_return_code stai_runtime_get_info(stai_runtime_info *info)
 	  #ifdef LL_ATON_EB_DBG_INFO
 	                          (1 << STAI_RT_EBDBG_BSHIFT) |
 	  #endif // LL_ATON_EB_DBG_INFO
-	                          0   // <--- 核心修复：在这里加一个 0，完美吸收掉前面可能悬空的 | 符号
+	                          0   /* Keeps the expression valid when all optional flags are disabled. */
 	                              ),
 
       .compiler_id = _STAI_COMPILER_ID,

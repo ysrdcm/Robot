@@ -367,7 +367,7 @@ void HAL_UART_MspInit(UART_HandleTypeDef* huart)
   /** Initializes the peripherals clock
   */
     PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_UART4;
-    /* CODEX 2026-07-20: Use the UART4 clock selector, not the USART1 selector. */
+    /* Select the dedicated UART4 kernel clock. */
     PeriphClkInitStruct.Uart4ClockSelection = RCC_UART4CLKSOURCE_CLKP;
     if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
     {
@@ -435,7 +435,7 @@ void HAL_UART_MspInit(UART_HandleTypeDef* huart)
 	GPIO_InitStruct.Alternate = GPIO_AF4_USART1;
 	HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
-    /* CODEX 2026-07-24: Enable byte-wise RC-100B reception on USART1. */
+    /* Enable byte-wise RC-100B reception on USART1. */
     HAL_NVIC_SetPriority(USART1_IRQn, 6, 0);
     HAL_NVIC_EnableIRQ(USART1_IRQn);
 
@@ -490,7 +490,7 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* huart)
     */
     HAL_GPIO_DeInit(GPIOF, GPIO_PIN_13|GPIO_PIN_12);
 
-    /* CODEX 2026-07-24: Disable the RC-100B receive interrupt with USART1. */
+    /* Disable the RC-100B receive interrupt with USART1. */
     HAL_NVIC_DisableIRQ(USART1_IRQn);
 
   /* USER CODE BEGIN USART1_MspDeInit 1 */

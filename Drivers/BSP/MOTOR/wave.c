@@ -75,7 +75,7 @@ extern TIM_HandleTypeDef htim9;
 #define ECHO_PORT GPIOF
 #define ECHO_PIN  GPIO_PIN_7   // 核心改动：Echo 引脚�?MX_TIM9_Init 中的 PF7 保持一�?
 #define ECHO_TIM_CHANNEL TIM_CHANNEL_1
-/* CODEX 2026-07-16: 30 ms covers HC-SR04 max echo time while keeping the control task responsive. */
+/* 30 ms covers the HC-SR04 echo window without blocking the control task for long. */
 #define WAVE_TIMEOUT_TICKS 30U
 
 // 声明 ThreadX 信号量，用于同步中断与测距线�?
@@ -86,7 +86,6 @@ static volatile uint8_t  capture_state = 0;
 static volatile uint16_t capture_val1 = 0;
 static volatile uint16_t capture_val2 = 0;
 static volatile uint16_t high_time = 0;
-/* CODEX 2026-07-16: Reject late capture callbacks after a measurement timeout. */
 static volatile uint8_t  wave_waiting = 0;
 
 /**
@@ -122,7 +121,7 @@ float Wave_Get_Distance(void)
 {
     float distance = -1.0f;
 
-    /* CODEX 2026-07-16: Drain any stale completion from a previous timed-out measurement. */
+    /* Drain a stale completion left by a timed-out measurement. */
     while (tx_semaphore_get(&wave_sem, TX_NO_WAIT) == TX_SUCCESS) { }
 
     // 1. 强刷捕获状态机，确保从上升沿开�?
@@ -134,7 +133,7 @@ float Wave_Get_Distance(void)
     // 清除可能残存的中断标志位，防止误触发
     __HAL_TIM_CLEAR_IT(&htim9, TIM_IT_CC1);
 
-    /* CODEX 2026-07-16: Arm input capture before sending the trigger pulse. */
+    /* Arm input capture before the trigger pulse to avoid missing the echo edge. */
     HAL_TIM_IC_Start_IT(&htim9, ECHO_TIM_CHANNEL);
 
     // 2. 物理触发：发�?15us 高电平脉冲触发超声波模块
@@ -171,7 +170,7 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == TIM9)
     {
-        /* CODEX 2026-07-16: Ignore callbacks that belong to a measurement already timed out. */
+        /* Ignore a late callback from a measurement that already timed out. */
         if (wave_waiting == 0)
         {
             return;
