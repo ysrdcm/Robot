@@ -1,7 +1,6 @@
 /**
  * @file app.c
- * @brief Patrol control, AI inference, display and event-log tasks.
- * @license Copyright (c) 2020-2032, 广州市星翼电子科技有限公司
+ * @brief 巡防控制、AI 推理、画面显示与事件日志任务。
  */
 
 #include "app.h"
@@ -15,6 +14,7 @@
 #include "tx_api.h"
 #include "cmw_camera.h"
 #include "ll_aton_runtime.h"
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -40,7 +40,7 @@ static uint16_t raw_loss_confirm_cnt = 0;
 static float    smooth_w = 0;
 static float    smooth_h = 0;
 
-/* Robot control and sensor timing. */
+/* 控制与传感器时序参数。 */
 #define PERSON_CLASS_INDEX                 0
 #define ULTRASONIC_SAMPLE_PERIOD_MS        60U
 #define RC100_LINK_TIMEOUT_MS              500U
@@ -54,11 +54,11 @@ static float    smooth_h = 0;
 #define CAMERA_SERVO_AUTO_MAX_STEP          7.5f
 #define CAMERA_SERVO_SCAN_STEP              6.0f
 #define SERVO_DETECTION_HOLD_MS             300U
-/* DCMIPP watchdog timing; recovery runs outside the interrupt handler. */
+/* DCMIPP 看门狗只在控制线程中执行恢复，避免在中断中调用阻塞式 HAL 接口。 */
 #define CAMERA_FRAME_TIMEOUT_MS            2000U
 #define CAMERA_RECOVERY_RETRY_MS           1500U
 
-/* Event snapshots use BMP because the inference frame is raw RGB888. */
+/* 推理帧为 RGB888，事件缩略图直接编码为无需额外编解码器的 BMP。 */
 #define PERSON_CONFIRM_FRAMES              4U
 #define PERSON_LOSS_FRAMES                 8U
 #define SNAPSHOT_WIDTH                     (NN_WIDTH / 2U)
@@ -66,7 +66,7 @@ static float    smooth_h = 0;
 #define SNAPSHOT_ROW_BYTES                 (((SNAPSHOT_WIDTH * 3U) + 3U) & ~3U)
 #define SNAPSHOT_HEADER_BYTES              54U
 #define SNAPSHOT_BMP_SIZE                  (SNAPSHOT_HEADER_BYTES + (SNAPSHOT_ROW_BYTES * SNAPSHOT_HEIGHT))
-/* The image is served separately so HTTP buffers stay bounded. */
+/* 网页和图片分开传输，避免 HTTP 工作缓冲区随图片增大。 */
 #define WIFI_HTTP_REQUEST_SIZE             1024U
 #define WIFI_PAGE_BUFFER_SIZE              4096U
 #define WIFI_IPD_HEADER_SIZE               96U
@@ -78,7 +78,7 @@ typedef enum {
     STATE_COMBAT
 } RobotState_t;
 
-/* Robot control thread. */
+/* 机器人控制线程。 */
 static TX_THREAD ctrl_thread;
 static UCHAR ctrl_thread_stack[2048];
 static VOID ctrl_thread_entry(ULONG id);
@@ -124,6 +124,17 @@ static VOID isp_thread_entry(ULONG id);
 
 static app_display_t display;
 
+static uint8_t app_is_valid_person_detection(const od_pp_outBuffer_t *detect)
+{
+    return (detect != NULL) &&
+           (detect->class_index == PERSON_CLASS_INDEX) &&
+           (detect->conf >= AI_OBJDETECT_YOLOV2_PP_CONF_THRESHOLD) &&
+           (detect->x_center >= 0.0f) && (detect->x_center <= 1.0f) &&
+           (detect->y_center >= 0.0f) && (detect->y_center <= 1.0f) &&
+           (detect->width > 0.0f) && (detect->width <= 1.0f) &&
+           (detect->height > 0.0f) && (detect->height <= 1.0f);
+}
+
 LL_ATON_DECLARE_NAMED_NN_INSTANCE_AND_INTERFACE(Default);
 
 static uint8_t nn_input_buffers[2][NN_WIDTH * NN_HEIGHT * NN_BPP] __attribute__((aligned(32))) __attribute__((section(".EXTRAM")));
@@ -135,11 +146,11 @@ static const char *nn_classes_table[NN_CLASSES] = NN_CLASSES_TABLE;
 static app_cpuload_t cpuload;
 
 static TX_THREAD wifi_thread;
-/* HTTP formatting and AT parsing require more stack than control tasks. */
+/* HTTP 格式化和 AT 解析需要比普通控制任务更大的栈。 */
 static UCHAR wifi_thread_stack[4096];
 static VOID wifi_thread_entry(ULONG id);
 
-/* Each thumbnail remains paired with its inference result queue slot. */
+/* 每张缩略图与对应的推理输出队列槽一一配对。 */
 static uint8_t nn_snapshot_buffers[2][SNAPSHOT_BMP_SIZE]
     __attribute__((aligned(32))) __attribute__((section(".EXTRAM")));
 static uint8_t event_best_image[SNAPSHOT_BMP_SIZE]
@@ -148,7 +159,7 @@ static uint8_t latest_event_image[SNAPSHOT_BMP_SIZE]
     __attribute__((aligned(32))) __attribute__((section(".EXTRAM")));
 static uint8_t wifi_tx_image[SNAPSHOT_BMP_SIZE]
     __attribute__((aligned(32))) __attribute__((section(".EXTRAM")));
-/* Shared buffers keep large HTTP and image data off the thread stack. */
+/* 大块 HTTP 和图像缓冲区放在外部 RAM，避免占用线程栈。 */
 static uint8_t wifi_page_buffer[WIFI_PAGE_BUFFER_SIZE]
     __attribute__((aligned(32))) __attribute__((section(".EXTRAM")));
 static TX_MUTEX snapshot_lock;
@@ -158,7 +169,23 @@ static uint32_t latest_event_tick = 0;
 static uint32_t latest_event_id = 0;
 static uint8_t person_event_active = 0;
 
-/* Build a browser-readable thumbnail from the exact RGB888 inference frame. */
+/* 摄像头恢复后不得继续使用故障前的检测坐标或事件候选帧。 */
+static void app_reset_person_detection(void)
+{
+    ai_person_detected = 0U;
+    ai_person_x = 0.5f;
+    ai_person_y = 0.5f;
+    ai_person_w = 0.0f;
+    ai_person_h = 0.0f;
+    raw_detect_confirm_cnt = 0U;
+    raw_loss_confirm_cnt = 0U;
+    smooth_w = 0.0f;
+    smooth_h = 0.0f;
+    person_event_active = 0U;
+    event_best_confidence = -1.0f;
+}
+
+/* 从实际送入 NPU 的 RGB888 帧生成浏览器可显示的缩略图。 */
 static void snapshot_write_u16(uint8_t *dst, uint16_t value)
 {
     dst[0] = (uint8_t)value;
@@ -231,7 +258,7 @@ static void snapshot_publish_event(void)
     tx_mutex_put(&snapshot_lock);
 }
 
-/* Parse one complete +IPD frame using its declared payload length. */
+/* 严格按照 +IPD 声明的长度读取一个完整请求。 */
 static uint8_t wifi_read_ipd_packet(uint8_t *link_id,
                                     char *request,
                                     uint32_t request_capacity,
@@ -398,7 +425,7 @@ static uint32_t wifi_build_event_page(void)
         return page_length + (uint32_t)written;
     }
 
-    /* A separate request avoids Base64 overhead and lets the page render first. */
+    /* 图片独立请求可避免 Base64 膨胀，并让网页先完成排版。 */
     written = snprintf((char *)&wifi_page_buffer[page_length],
                        WIFI_PAGE_BUFFER_SIZE - page_length,
                        "<figure><img alt=\"&#20107;&#20214;&#22270;&#20687;\" "
@@ -421,7 +448,7 @@ static void Camera_Servo_Manual_Update(int8_t direction)
 {
     uint32_t now = HAL_GetTick();
 
-    /* Fixed timing makes servo speed independent of control-loop load. */
+    /* 固定更新周期使舵机速度不受控制线程负载影响。 */
     if ((now - camera_servo_last_update_tick) <
         CAMERA_SERVO_UPDATE_PERIOD_MS)
     {
@@ -462,7 +489,7 @@ void Camera_Servo_Update(float target_x, uint8_t is_tracking)
         last_tracking_tick = now;
     }
 
-    /* Scan and tracking share a steady time base. */
+    /* 扫描与跟踪共用固定更新周期。 */
     if ((now - camera_servo_last_update_tick) <
         CAMERA_SERVO_UPDATE_PERIOD_MS)
     {
@@ -471,18 +498,15 @@ void Camera_Servo_Update(float target_x, uint8_t is_tracking)
     camera_servo_last_update_tick = now;
 
     if (is_tracking) {
-        /* Ignore small detector jitter, then low-pass the remaining movement. */
-        if (fabs(target_x - filtered_target_x) > 0.05f) {
+        /* 忽略小幅检测抖动，再对有效位移进行低通滤波。 */
+        if (fabsf(target_x - filtered_target_x) > 0.05f) {
             filtered_target_x = filtered_target_x * 0.90f + target_x * 0.10f;
         }
 
         float error = filtered_target_x - 0.5f;
         float step = 0.0f;
 
-        /*
-         * Incremental control holds the current angle when
-         * the person is centered instead of repeatedly commanding 1500 us.
-         */
+        /* 增量控制在人居中时保持当前角度，而不是强制回到 1500 us。 */
         if (fabsf(error) > CAMERA_SERVO_AUTO_DEADBAND)
         {
             step = -error * CAMERA_SERVO_AUTO_GAIN;
@@ -499,7 +523,7 @@ void Camera_Servo_Update(float target_x, uint8_t is_tracking)
     } else if ((last_tracking_tick == 0U) ||
                ((now - last_tracking_tick) >
                 SERVO_DETECTION_HOLD_MS)) {
-        /* Resume scanning only after the short detection hold expires. */
+        /* 短暂丢检期间保持角度，超时后才恢复扫描。 */
         camera_servo_pwm += auto_dir * CAMERA_SERVO_SCAN_STEP;
         if (camera_servo_pwm > CAMERA_SERVO_PWM_MAX) {
             camera_servo_pwm = CAMERA_SERVO_PWM_MAX;
@@ -511,7 +535,7 @@ void Camera_Servo_Update(float target_x, uint8_t is_tracking)
         }
         filtered_target_x = 0.5f;
     }
-    /* Clamp tracking and scan motion to the SG90 range. */
+    /* 跟踪和扫描均限制在 SG90 的机械行程内。 */
     if (camera_servo_pwm > CAMERA_SERVO_PWM_MAX)
     {
         camera_servo_pwm = CAMERA_SERVO_PWM_MAX;
@@ -523,7 +547,7 @@ void Camera_Servo_Update(float target_x, uint8_t is_tracking)
     __HAL_TIM_SET_COMPARE(&htim15, TIM_CHANNEL_1, (uint32_t)camera_servo_pwm);
 }
 
-/* Resolve conflicting direction buttons and enforce the forward obstacle stop. */
+/* 处理互斥方向键，并执行前向障碍紧急停车。 */
 static void Manual_Drive_Update(uint16_t buttons, float distance_cm)
 {
     uint16_t direction = buttons & (RC100_BUTTON_UP | RC100_BUTTON_DOWN |
@@ -542,7 +566,7 @@ static void Manual_Drive_Update(uint16_t buttons, float distance_cm)
     else if ((obstacle != 0U) && (direction != RC100_BUTTON_DOWN) &&
              (direction != 0U))
     {
-        /* Front obstacle blocks forward/turning commands but still permits retreat. */
+        /* 前方有障碍时禁止前进和转向，但仍允许后退。 */
         Car_Stop();
     }
     else if (direction == (RC100_BUTTON_UP | RC100_BUTTON_LEFT))
@@ -584,10 +608,12 @@ static VOID ctrl_thread_entry(ULONG id)
     uint32_t state_start_time = 0;
     float    lock_width = 0;
     float    lock_height = 0;
-    /* Cache distance because HC-SR04 needs a quiet interval between triggers. */
+    /* HC-SR04 两次触发之间需要静默间隔，因此复用最近一次有效距离。 */
     uint32_t last_ultrasonic_tick = 0;
     float    dist = -1.0f;
     uint32_t last_camera_recovery_attempt = 0U;
+
+    (void)id;
 
     while(1)
     {
@@ -601,19 +627,14 @@ static VOID ctrl_thread_entry(ULONG id)
             ((now - last_camera_recovery_attempt) >=
              CAMERA_RECOVERY_RETRY_MS))
         {
-            /*
-             * Recover a stalled DCMIPP pipeline in thread
-             * context. Do not let stale AI coordinates keep steering outputs.
-             */
+            /* 在线程中恢复 DCMIPP，并先清除检测状态，防止旧坐标继续驱动执行器。 */
             last_camera_recovery_attempt = now;
             Car_Stop();
             Laser_Fire(0U);
             BEEP(0);
 
             tx_mutex_get(&ai_data_lock, TX_WAIT_FOREVER);
-            ai_person_detected = 0U;
-            raw_detect_confirm_cnt = 0U;
-            raw_loss_confirm_cnt = 0U;
+            app_reset_person_detection();
             tx_mutex_put(&ai_data_lock);
 
             if (app_camera_recover() == HAL_OK)
@@ -643,7 +664,7 @@ static VOID ctrl_thread_entry(ULONG id)
         float p_w = ai_person_w; float p_h = ai_person_h;
         tx_mutex_put(&ai_data_lock);
 
-        /* Manual drive has priority, while the gimbal continues AI tracking. */
+        /* 人工驾驶优先，二维云台仍使用 AI 坐标跟踪。 */
         {
             rc100_state_t remote_state;
             uint16_t remote_buttons = 0U;
@@ -660,24 +681,18 @@ static VOID ctrl_thread_entry(ULONG id)
             mode_buttons = remote_buttons & (RC100_BUTTON_5 | RC100_BUTTON_6);
             if (mode_buttons == 0U)
             {
-                /* Require a release packet before accepting another mode change. */
+                /* 必须先收到按键释放帧，才允许下一次模式切换。 */
                 mode_button_armed = 1U;
             }
 
-            /*
-             * Add camera yaw to the existing image tracking
-             * correction so the gimbal targets in chassis coordinates.
-             */
+            /* 将摄像头偏航叠加到图像误差，使云台目标转换到车体坐标系。 */
             Gimbal_Targeting_Update(p_x, p_y, p_det, camera_servo_pwm);
 
             if ((mode_button_armed != 0U) &&
                 (manual_mode == 0U) &&
                 ((remote_buttons & RC100_BUTTON_6) != 0U))
             {
-                /*
-                 * Treat mechanically combined 5+6 as one
-                 * press and wait for release before another mode transition.
-                 */
+                /* 遥控器上机械联动的 5+6 视为一次按键，释放前不重复切换。 */
                 mode_button_armed = 0U;
                 manual_mode = 1U;
                 rc100_manual_mode_display = 1U;
@@ -693,7 +708,7 @@ static VOID ctrl_thread_entry(ULONG id)
                 (manual_mode != 0U) &&
                 ((remote_buttons & RC100_BUTTON_5) != 0U))
             {
-                /* Stop manual outputs before resuming autonomous patrol. */
+                /* 恢复自动巡防前先关闭人工模式下的全部输出。 */
                 mode_button_armed = 0U;
                 Car_Stop();
                 Laser_Fire(0U);
@@ -742,7 +757,7 @@ static VOID ctrl_thread_entry(ULONG id)
                     Car_Stop();
                     state = STATE_WARNING;
                     state_start_time = HAL_GetTick();
-                    /* Save the initial box size for approach estimation. */
+                    /* 保存初始目标框尺寸，用于判断人员是否靠近。 */
                     lock_width = p_w;
                     lock_height = p_h;
                 }
@@ -757,7 +772,7 @@ static VOID ctrl_thread_entry(ULONG id)
                 break;
 
             case STATE_AVOID:
-                /* Person detection preempts the timed avoidance sequence. */
+                /* 检测到人时立即中断定时避障流程。 */
                 if (p_det) {
                     Car_Stop();
                     state = STATE_WARNING;
@@ -772,7 +787,7 @@ static VOID ctrl_thread_entry(ULONG id)
                     const uint32_t dt_fw_w = 1800;
                     const uint32_t dt_fw_l = 4450;
 
-                    /* Cumulative boundaries for the rectangular detour. */
+                    /* 各时间点是矩形绕障动作的累计边界。 */
                     const uint32_t t1 = dt_back;
                     const uint32_t t2 = t1 + dt_turn;
                     const uint32_t t3 = t2 + dt_fw_w;
@@ -792,7 +807,7 @@ static VOID ctrl_thread_entry(ULONG id)
                         break;
                     }
 
-                    /* Restart the detour if another close obstacle appears. */
+                    /* 绕障途中再次遇到近距离障碍时重新开始。 */
                     if (elapsed > t1 && dist > 0 && dist < 15.0f) {
                         Car_Stop();
                         state_start_time = HAL_GetTick();
@@ -841,11 +856,13 @@ static VOID ctrl_thread_entry(ULONG id)
 
             case STATE_WARNING:
                 if (!p_det) {
+                    BEEP(0);
+                    Laser_Fire(0);
                     state = STATE_PATROL;
                 } else {
                     uint32_t elapsed = HAL_GetTick() - state_start_time;
 
-                    /* Three 300 ms on/off warning pulses. */
+                    /* 以 300 ms 为周期鸣叫三次。 */
                     if (elapsed < 1800) {
                         uint32_t stage = elapsed / 300;
                         if (stage % 2 == 0) {
@@ -854,7 +871,7 @@ static VOID ctrl_thread_entry(ULONG id)
                             BEEP(0);
                         }
 
-                        /* A 15% box growth indicates that the person approached. */
+                        /* 目标框宽高均增大 15% 时判定人员正在靠近。 */
                         if ((p_w > lock_width * 1.15f) && (p_h > lock_height * 1.15f)) {
                             BEEP(0);
                             state = STATE_COMBAT;
@@ -868,6 +885,7 @@ static VOID ctrl_thread_entry(ULONG id)
 
             case STATE_COMBAT:
                 if (!p_det) {
+                    Laser_Fire(0);
                     state = STATE_PATROL;
                 } else {
                     Laser_Fire(1);
@@ -884,16 +902,18 @@ static VOID wifi_thread_entry(ULONG id)
     uint8_t init_status;
     char request[WIFI_HTTP_REQUEST_SIZE];
 
-    /* Start reception before reset so the ESP8266 boot response is captured. */
+    (void)id;
+
+    /* 复位前启动接收，以免遗漏 ESP8266 启动信息。 */
     ESP8266_Log_UART_Start();
 
-    /* PQ4 provides recovery even when AT firmware is unresponsive. */
+    /* AT 固件无响应时仍可通过 PQ4 硬件复位恢复。 */
     do
     {
         HAL_GPIO_WritePin(GPIOQ, GPIO_PIN_4, GPIO_PIN_RESET);
         tx_thread_sleep(20);
         HAL_GPIO_WritePin(GPIOQ, GPIO_PIN_4, GPIO_PIN_SET);
-        /* Wait for AT firmware startup before synchronization. */
+        /* 等待 AT 固件启动完成后再同步。 */
         tx_thread_sleep(1000);
         ESP8266_Log_UART_Flush();
 
@@ -918,7 +938,7 @@ static VOID wifi_thread_entry(ULONG id)
             continue;
         }
 
-        /* Route only after the complete declared HTTP payload is stored. */
+        /* 完整接收声明长度的 HTTP 数据后再进行路由。 */
         if (strstr(request, "GET /latest.bmp") != NULL)
         {
             static const char no_event[] =
@@ -950,7 +970,7 @@ static VOID wifi_thread_entry(ULONG id)
         }
         else if (strstr(request, "GET /favicon.ico ") != NULL)
         {
-            /* Some browsers request a favicon despite the embedded data icon. */
+            /* 单独响应部分浏览器仍会发出的 favicon 请求。 */
             printf("ESP HTTP GET /favicon.ico\r\n");
             (void)ESP8266_Log_Send_Response(link_id, "image/x-icon", NULL, 0U);
         }
@@ -989,8 +1009,6 @@ static VOID wifi_thread_entry(ULONG id)
         }
     }
 }
-// =================================================
-
 static void app_display_network_output(app_display_info_t *display_info);
 
 static void app_require_tx_success(UINT status)
@@ -1012,12 +1030,18 @@ void app_run(void)
         &nn_output_queue, 2,
         (uint8_t *[2]){nn_output_buffers[0], nn_output_buffers[1]}));
     app_cpuload_init(&cpuload);
-    app_camera_init(app_camera_display_pipe_vsync_cb, app_camera_display_pipe_frame_cb, NULL, app_camera_nn_pipe_frame_cb);
+    if (app_camera_init(app_camera_display_pipe_vsync_cb,
+                        app_camera_display_pipe_frame_cb,
+                        NULL,
+                        app_camera_nn_pipe_frame_cb) != HAL_OK)
+    {
+        Error_Handler();
+    }
 
     app_require_tx_success(tx_semaphore_create(&isp_semaphore, NULL, 0));
     app_require_tx_success(tx_semaphore_create(&display.update, NULL, 0));
     app_require_tx_success(tx_mutex_create(&display.lock, NULL, TX_INHERIT));
-    /* Protect event data while the Wi-Fi thread serves it. */
+    /* Wi-Fi 发送期间用互斥量保护事件数据。 */
     app_require_tx_success(tx_mutex_create(
         &snapshot_lock, "Snapshot Lock", TX_INHERIT));
 
@@ -1034,7 +1058,7 @@ void app_run(void)
     app_require_tx_success(tx_thread_create(&dp_thread, "DP Thread", dp_thread_entry, 0, dp_thread_stack, sizeof(dp_thread_stack), TX_MAX_PRIORITIES - 2, TX_MAX_PRIORITIES - 2, 10, TX_AUTO_START));
     app_require_tx_success(tx_thread_create(&isp_thread, "ISP Thread", isp_thread_entry, 0, isp_thread_stack, sizeof(isp_thread_stack), TX_MAX_PRIORITIES - 4, TX_MAX_PRIORITIES - 4, 10, TX_AUTO_START));
 
-    /* Control shares post-processing priority to keep actuator response timely. */
+    /* 控制线程与后处理线程同优先级，兼顾执行器响应和检测吞吐。 */
     app_require_tx_success(tx_thread_create(&ctrl_thread, "Ctrl Thread", ctrl_thread_entry, 0, ctrl_thread_stack, sizeof(ctrl_thread_stack), TX_MAX_PRIORITIES - 2, TX_MAX_PRIORITIES - 2, 10, TX_AUTO_START));
     app_require_tx_success(tx_thread_create(&wifi_thread, "WiFi Thread", wifi_thread_entry, 0, wifi_thread_stack, sizeof(wifi_thread_stack), TX_MAX_PRIORITIES - 1, TX_MAX_PRIORITIES - 1, 10, TX_AUTO_START));
 }
@@ -1076,6 +1100,8 @@ static VOID nn_thread_entry(ULONG id)
     uint32_t time_stamp;
     uint32_t inf_ms;
 
+    (void)id;
+
     nn_in_len = LL_Buffer_len(LL_ATON_Input_Buffers_Info_Default());
     nn_out_len = LL_Buffer_len(LL_ATON_Output_Buffers_Info_Default());
 
@@ -1109,7 +1135,7 @@ static VOID nn_thread_entry(ULONG id)
         LL_ATON_RT_Main(&NN_Instance_Default);
         inf_ms = HAL_GetTick() - time_stamp;
 
-        /* Pair the inference result with the exact frame used by the NPU. */
+        /* 使用送入 NPU 的同一帧生成事件图片。 */
         {
             uint8_t *snapshot = snapshot_for_output_buffer(output_buffer);
             if (snapshot != NULL)
@@ -1135,7 +1161,10 @@ static VOID pp_thread_entry(ULONG id)
     od_pp_out_t pp_output;
     uint32_t nn_pp[2];
     int32_t detect_count;
+    int32_t person_count;
     int32_t i;
+
+    (void)id;
 
     app_postprocess_init(&pp_params);
 
@@ -1163,26 +1192,29 @@ static VOID pp_thread_entry(ULONG id)
         }
 
         tx_mutex_get(&display.lock, TX_WAIT_FOREVER);
-        display.info.nb_detect = detect_count;
+        person_count = 0;
         for (i = 0; i < detect_count; i++)
         {
-            display.info.detects[i] = pp_output.pOutBuff[i];
+            if (app_is_valid_person_detection(&pp_output.pOutBuff[i]) != 0U)
+            {
+                display.info.detects[person_count++] = pp_output.pOutBuff[i];
+            }
         }
+        display.info.nb_detect = person_count;
         display.info.pp_ms = nn_pp[1] - nn_pp[0];
         tx_mutex_put(&display.lock);
 
 
-        /* Publish detection state atomically for the control thread. */
+        /* 将检测状态作为一个整体发布给控制线程。 */
         tx_mutex_get(&ai_data_lock, TX_WAIT_FOREVER);
 
-        /* Select the highest-confidence person rather than assuming box zero. */
+        /* 从全部检测框中选择置信度最高的人。 */
         od_pp_outBuffer_t *person = NULL;
         float best_person_conf = 0.0f;
         for (i = 0; i < detect_count; i++)
         {
             od_pp_outBuffer_t *candidate = &pp_output.pOutBuff[i];
-            if ((candidate->class_index == PERSON_CLASS_INDEX) &&
-                (candidate->conf >= AI_OBJDETECT_YOLOV2_PP_CONF_THRESHOLD) &&
+            if ((app_is_valid_person_detection(candidate) != 0U) &&
                 (candidate->conf > best_person_conf))
             {
                 person = candidate;
@@ -1192,7 +1224,7 @@ static VOID pp_thread_entry(ULONG id)
 
         if (person != NULL)
         {
-            /* Retain only the highest-confidence frame from the active event. */
+            /* 当前事件只保留置信度最高的一帧。 */
             if ((raw_detect_confirm_cnt == 0U) && (person_event_active == 0U))
             {
                 event_best_confidence = -1.0f;
@@ -1209,7 +1241,7 @@ static VOID pp_thread_entry(ULONG id)
 
             raw_loss_confirm_cnt = 0;
 
-            /* Require consecutive detections before the control state sees a person. */
+            /* 连续多帧检出后才向控制状态机确认有人。 */
             if (raw_detect_confirm_cnt < PERSON_CONFIRM_FRAMES) {
                 raw_detect_confirm_cnt++;
             }
@@ -1221,7 +1253,7 @@ static VOID pp_thread_entry(ULONG id)
                 ai_person_x = person->x_center;
                 ai_person_y = person->y_center;
 
-                /* Smooth box size before using it for approach detection. */
+                /* 判断靠近前先平滑目标框尺寸。 */
                 if (smooth_w == 0) {
                     smooth_w = person->width;
                     smooth_h = person->height;
@@ -1238,7 +1270,7 @@ static VOID pp_thread_entry(ULONG id)
         {
             raw_detect_confirm_cnt = 0;
 
-            /* End an event only after consecutive missed detections. */
+            /* 连续多帧丢检后才结束一次事件。 */
             if (person_event_active == 1U) {
                 raw_loss_confirm_cnt++;
                 if (raw_loss_confirm_cnt >= PERSON_LOSS_FRAMES) {
@@ -1273,6 +1305,8 @@ static VOID dp_thread_entry(ULONG id)
     app_display_info_t display_info;
     uint32_t time_stamp;
 
+    (void)id;
+
     while (1)
     {
         tx_semaphore_get(&display.update, TX_WAIT_FOREVER);
@@ -1290,6 +1324,8 @@ static VOID dp_thread_entry(ULONG id)
 
 static VOID isp_thread_entry(ULONG id)
 {
+    (void)id;
+
     while (1)
     {
         tx_semaphore_get(&isp_semaphore, TX_WAIT_FOREVER);
@@ -1341,17 +1377,10 @@ static void app_display_detection(od_pp_outBuffer_t *detect)
     int32_t h;
 
     /*
-     * Reject malformed, non-person and degenerate boxes.
-     * A zero-sized rectangle underflows inside UTIL_LCD_DrawRect() and can
-     * briefly draw a long green line outside the intended detection box.
+     * 过滤格式异常、类别不符和尺寸退化的检测框。零尺寸矩形会使
+     * UTIL_LCD_DrawRect() 内部发生下溢，并在画面上产生异常长线。
      */
-    if ((detect == NULL) ||
-        (detect->class_index != PERSON_CLASS_INDEX) ||
-        (detect->conf < AI_OBJDETECT_YOLOV2_PP_CONF_THRESHOLD) ||
-        !(detect->x_center >= 0.0f && detect->x_center <= 1.0f) ||
-        !(detect->y_center >= 0.0f && detect->y_center <= 1.0f) ||
-        !(detect->width > 0.0f && detect->width <= 1.0f) ||
-        !(detect->height > 0.0f && detect->height <= 1.0f))
+    if (app_is_valid_person_detection(detect) == 0U)
     {
         return;
     }
@@ -1394,10 +1423,7 @@ static void app_display_network_output(app_display_info_t *display_info)
     app_cpuload_update(&cpuload);
     app_cpuload_get_info(&cpuload, NULL, &cpuload_one_second, NULL);
 
-    /*
-     * On-screen RC-100 diagnostics replace unavailable
-     * USART1 logging. Counts let field tests distinguish wiring from framing.
-     */
+    /* USART1 被蓝牙占用时用屏幕计数区分接线故障和数据帧错误。 */
     RC100_GetState(&remote_state);
     if (remote_state.byte_count == 0U)
     {

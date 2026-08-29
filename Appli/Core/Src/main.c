@@ -95,9 +95,7 @@ static void MX_RAMCFG_Init(void);
 static void SystemIsolation_Config(void);
 /* USER CODE BEGIN PFP */
 static VOID main_thread_entry(ULONG id);
-//#ifdef DEBUG
 static void system_clock_config(void);
-//#endif
 static void npu_config(void);
 static void iac_config(void);
 static void npu_cache_config(void);
@@ -866,7 +864,7 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  /* BT-410 factory UART configuration. */
+  /* BT-410 出厂串口参数。 */
   huart1.Init.BaudRate = 57600;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
@@ -1260,6 +1258,8 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 VOID tx_application_define(VOID *first_unused_memory)
 {
+  (void)first_unused_memory;
+
   if (tx_thread_create(&main_thread, "Main Thread", main_thread_entry, 0, main_thread_stack, sizeof(main_thread_stack), TX_MAX_PRIORITIES - 1, TX_MAX_PRIORITIES - 1, 10, TX_AUTO_START) != TX_SUCCESS)
   {
     Error_Handler();
@@ -1272,6 +1272,8 @@ static VOID main_thread_entry(ULONG id)
   HyperRAM_ObjectTypeDef HyperRAMObject = {0};
   NORFlash_ObjectTypeDef NORFlashObject = {0};
 #endif
+
+  (void)id;
 
   system_clock_config();
   SystemCoreClockUpdate();
@@ -1313,13 +1315,13 @@ static VOID main_thread_entry(ULONG id)
   }
 #endif
 
-  uart_init(115200);
+  uart_stdio_init();
   npu_config();
   iac_config();
   npu_cache_config();
   low_power_clock_config();
 
-  /* Start all motor and servo PWM channels before enabling control. */
+  /* 启用控制逻辑前先启动全部电机和舵机 PWM 通道。 */
   if ((HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1) != HAL_OK) ||
       (HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4) != HAL_OK) ||
       (HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1) != HAL_OK) ||
@@ -1343,7 +1345,6 @@ static VOID main_thread_entry(ULONG id)
   app_run();
 }
 
-//#ifdef DEBUG
 static void system_clock_config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
@@ -1452,8 +1453,6 @@ static void system_clock_config(void)
     Error_Handler();
   }
 }
-//#endif
-
 static void npu_config(void)
 {
   __HAL_RCC_NPU_CLK_ENABLE();

@@ -3,7 +3,7 @@
 
 #include "main.h"
 
-/* ROBOTIS RC-100B button bitmap. */
+/* ROBOTIS RC-100B 按键位图。 */
 #define RC100_BUTTON_UP       0x0001U
 #define RC100_BUTTON_DOWN     0x0002U
 #define RC100_BUTTON_LEFT     0x0004U

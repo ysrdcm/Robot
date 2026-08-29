@@ -9,21 +9,15 @@ extern TIM_HandleTypeDef htim4;
 #define SERVO_PAN_MAX                   2500.0f
 #define SERVO_TILT_MIN                  1000.0f
 #define SERVO_TILT_MAX                  2000.0f
-/* Limit each update so detector jitter cannot cause abrupt gimbal motion. */
+/* 限制单次变化量，避免检测抖动造成云台突跳。 */
 #define SERVO_TRACK_MAX_STEP               3.0f
 #define GIMBAL_DETECTION_HOLD_MS          300U
 
-/*
- * Camera and gimbal centers/ranges are calibrated in PWM
- * microseconds. Both use decreasing PWM for the chassis-right direction.
- */
+/* 摄像头和云台均用 PWM 微秒值标定，向车体右侧转动时 PWM 减小。 */
 #define CAMERA_PAN_CENTER_PWM           1500.0f
 #define CAMERA_PAN_HALF_RANGE_PWM        800.0f
 #define GIMBAL_PAN_CENTER_PWM           1500.0f
-/*
- * This range compensates camera yaw without changing centered-camera image
- * tracking. Calibrate it separately for the left and right mechanical limits.
- */
+/* 该行程只补偿摄像头偏航，不改变摄像头居中时的图像跟踪比例。 */
 #define GIMBAL_PAN_HALF_RANGE_PWM        670.0f
 #define CAMERA_TO_GIMBAL_PAN_SIGN          1.0f
 
@@ -82,10 +76,7 @@ void Gimbal_Targeting_Update(float target_x, float target_y,
             filtered_y = filtered_y * 0.90f + target_y * 0.10f;
         }
 
-        /*
-         * Preserve the image correction that is accurate
-         * with a centered camera, then add the camera's chassis-relative yaw.
-         */
+        /* 先计算图像误差，再叠加摄像头相对车体的偏航补偿。 */
         camera_pan_offset =
             (camera_pan_pwm - CAMERA_PAN_CENTER_PWM) /
             CAMERA_PAN_HALF_RANGE_PWM;
@@ -116,7 +107,7 @@ void Gimbal_Targeting_Update(float target_x, float target_y,
              ((HAL_GetTick() - last_detect_tick) >
               GIMBAL_DETECTION_HOLD_MS))
     {
-        /* Ignore short detector dropouts before recentering. */
+        /* 短暂丢检时保持位置，超时后再回中。 */
         current_pwm_pan =
             Servo_Smooth_Step(current_pwm_pan, GIMBAL_PAN_CENTER_PWM, 0.05f);
         current_pwm_tilt =

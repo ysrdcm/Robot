@@ -1,17 +1,27 @@
-/**
- ****************************************************************************************************
- * @file        app_cpuload.c
- * @author      正点原子团队(ALIENTEK)
- * @version     V1.0
- * @date        2025-01-13
- * @brief       app_cpuload.c文件
- * @license     Copyright (c) 2020-2032, 广州市星翼电子科技有限公司
- ****************************************************************************************************
- */
-
 #include "app_cpuload.h"
 #include "tx_api.h"
 #include <string.h>
+
+static float app_cpuload_calculate(uint64_t current_total, uint64_t previous_total,
+                                   uint64_t current_thread, uint64_t previous_thread)
+{
+    uint64_t total_delta;
+    uint64_t thread_delta;
+
+    if ((current_total <= previous_total) || (current_thread < previous_thread))
+    {
+        return 0.0f;
+    }
+
+    total_delta = current_total - previous_total;
+    thread_delta = current_thread - previous_thread;
+    if (thread_delta > total_delta)
+    {
+        return 0.0f;
+    }
+
+    return 100.0f * (float)thread_delta / (float)total_delta;
+}
 
 void app_cpuload_init(app_cpuload_t *cpuload)
 {
@@ -52,16 +62,19 @@ void app_cpuload_get_info(app_cpuload_t *cpuload, float *cpuload_last, float *cp
 {
     if (cpuload_last != NULL)
     {
-        *cpuload_last = 100.0 * (cpuload->history[0].thread - cpuload->history[1].thread) / (cpuload->history[0].total - cpuload->history[1].total);
+        *cpuload_last = app_cpuload_calculate(cpuload->history[0].total, cpuload->history[1].total,
+                                              cpuload->history[0].thread, cpuload->history[1].thread);
     }
 
     if (cpuload_last_second != NULL)
     {
-        *cpuload_last_second = 100.0 * (cpuload->history[2].thread - cpuload->history[3].thread) / (cpuload->history[2].total - cpuload->history[3].total);
+        *cpuload_last_second = app_cpuload_calculate(cpuload->history[2].total, cpuload->history[3].total,
+                                                     cpuload->history[2].thread, cpuload->history[3].thread);
     }
 
     if (cpuload_last_five_seconds != NULL)
     {
-        *cpuload_last_five_seconds = 100.0 * (cpuload->history[2].thread - cpuload->history[7].thread) / (cpuload->history[2].total - cpuload->history[7].total);
+        *cpuload_last_five_seconds = app_cpuload_calculate(cpuload->history[2].total, cpuload->history[7].total,
+                                                          cpuload->history[2].thread, cpuload->history[7].thread);
     }
 }

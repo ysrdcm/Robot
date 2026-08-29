@@ -24,6 +24,7 @@
 /* USER CODE BEGIN Includes */
 #include "cmw_camera.h"
 #include "rc100.h"
+#include "uart.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -57,7 +58,7 @@
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
-extern DCMIPP_HandleTypeDef hdcmipp;//这一行可能要注释掉
+extern DCMIPP_HandleTypeDef hdcmipp;
 extern TIM_HandleTypeDef htim9;
 extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart4;
@@ -230,8 +231,12 @@ void TIM9_IRQHandler(void)
   */
 void USART1_IRQHandler(void)
 {
-  /* Drain BT-410 bytes directly from RXFNE. */
+#if UART_EN_RX
+  HAL_UART_IRQHandler(&huart1);
+#else
+  /* 直接清空 RXFNE，避免 BT-410 连续数据产生接收间隙。 */
   RC100_UART_IRQHandler();
+#endif
 }
 
 /**

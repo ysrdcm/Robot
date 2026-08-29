@@ -1,7 +1,7 @@
 #ifndef __MOTOR_H
 #define __MOTOR_H
 
-#include "main.h" // 引入 STM32N6 的 HAL 库和 CubeMX 生成的引脚宏
+#include "main.h"
 
 /**
  * @brief  单独设置某个电机的速度和方向

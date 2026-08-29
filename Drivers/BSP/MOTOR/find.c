@@ -10,11 +10,11 @@
 #define O1_PORT GPIOD
 #define O1_PIN  GPIO_PIN_14
 
-/* Confirm a pattern before accepting it to reject single-sample glitches. */
-#define TRACK_PATTERN_CONFIRM_SAMPLES 2U
+/* 码型连续出现三次才确认，用于过滤单次采样毛刺。 */
+#define TRACK_PATTERN_CONFIRM_SAMPLES 3U
 #define TRACK_PATTERN_ALL_WHITE       0x00U
 #define TRACK_PATTERN_ALL_BLACK       0x0FU
-#define TRACK_LINE_LOST_HOLD_MS       3000U
+#define TRACK_LINE_LOST_HOLD_MS       2000U
 
 typedef void (*Track_Action_t)(void);
 
@@ -36,7 +36,7 @@ static Track_Action_t Track_Get_Action(uint8_t pattern)
 {
     switch (pattern)
     {
-        case 0x06U: /* 0 1 1 0: centered */
+        case 0x06U: /* 0 1 1 0：居中 */
             return Car_Forward;
 
         case 0x02U: /* 0 0 1 0 */
@@ -45,12 +45,12 @@ static Track_Action_t Track_Get_Action(uint8_t pattern)
         case 0x04U: /* 0 1 0 0 */
             return Car_SlightTurnLeft;
 
-        case 0x01U: /* 0 0 0 1: far left from line */
+        case 0x01U: /* 0 0 0 1：车身偏离黑线左侧 */
         case 0x03U: /* 0 0 1 1 */
         case 0x07U: /* 0 1 1 1 */
             return Car_TurnRight;
 
-        case 0x08U: /* 1 0 0 0: far right from line */
+        case 0x08U: /* 1 0 0 0：车身偏离黑线右侧 */
         case 0x0CU: /* 1 1 0 0 */
         case 0x0EU: /* 1 1 1 0 */
             return Car_TurnLeft;
@@ -62,10 +62,7 @@ static Track_Action_t Track_Get_Action(uint8_t pattern)
             return Car_Stop;
 
         default:
-            /*
-             * Undefined nonzero patterns use the configured left-turn
-             * fallback.
-             */
+            /* 未定义的非零码型按约定左转。 */
             return Car_TurnLeft;
     }
 }
@@ -79,10 +76,7 @@ void Track_Process(void)
     static Track_Action_t last_action = Car_Stop;
     uint8_t raw_pattern = Track_Read_Pattern();
 
-    /*
-     * Keep the last confirmed action across a short,
-     * continuous all-white gap, then stop using real elapsed milliseconds.
-     */
+    /* 全白时短暂保持上次确认动作，按真实毫秒计时，超时后停车。 */
     if (raw_pattern == TRACK_PATTERN_ALL_WHITE)
     {
         candidate_pattern = TRACK_PATTERN_ALL_WHITE;
@@ -100,10 +94,7 @@ void Track_Process(void)
         }
         else
         {
-            /*
-             * Keep the robot stopped until a new nonzero
-             * pattern passes the two-sample confirmation.
-             */
+            /* 停车后必须等新的非零码型连续确认三次才恢复动作。 */
             last_action = Car_Stop;
             Car_Stop();
         }
@@ -122,10 +113,7 @@ void Track_Process(void)
 
     if (candidate_count >= TRACK_PATTERN_CONFIRM_SAMPLES)
     {
-        /*
-         * Only a two-sample-confirmed nonzero pattern
-         * replaces the saved action or clears the line-loss timer.
-         */
+        /* 只有连续确认三次的非零码型才能更新动作并清除丢线计时。 */
         last_action = Track_Get_Action(candidate_pattern);
         line_lost_active = 0U;
     }

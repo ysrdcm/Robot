@@ -2,7 +2,7 @@
 
 extern UART_HandleTypeDef huart1;
 
-/* RC-100B packets contain a two-byte header and two complemented data bytes. */
+/* RC-100B 数据包由两字节帧头及两组互补数据字节组成。 */
 static uint8_t rc100_frame[6];
 static uint8_t rc100_frame_index;
 static volatile uint16_t rc100_buttons;
@@ -74,10 +74,7 @@ void RC100_Init(void)
     rc100_receive_start_failure_count = 0U;
     rc100_has_packet = 0U;
 
-    /*
-     * Receive directly from RXFNE instead of depending on
-     * HAL's one-byte asynchronous state machine and callback dispatch.
-     */
+    /* 直接从 RXFNE 取数，避免 HAL 单字节异步状态机造成接收间隙。 */
     __HAL_UART_DISABLE_IT(&huart1, UART_IT_RXFNE);
     __HAL_UART_DISABLE_IT(&huart1, UART_IT_ERR);
     __HAL_UART_SEND_REQ(&huart1, UART_RXDATA_FLUSH_REQUEST);
@@ -102,7 +99,7 @@ void RC100_UART_IRQHandler(void)
 
     if (error_flags != 0U)
     {
-        /* A line error invalidates the partially assembled packet. */
+        /* 线路错误会使正在组装的数据包失效。 */
         rc100_uart_error_count++;
         WRITE_REG(huart1.Instance->ICR,
                   USART_ICR_PECF | USART_ICR_FECF |
@@ -126,7 +123,7 @@ void RC100_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         return;
     }
 
-    rc100_byte_count++;
+    /* 兼容 HAL 回调入口；实际字节统一由 RXFNE 读取并计数。 */
     RC100_UART_IRQHandler();
 }
 
@@ -137,7 +134,7 @@ void RC100_UART_ErrorCallback(UART_HandleTypeDef *huart)
         return;
     }
 
-    /* Resynchronize after noise or electrical contention. */
+    /* 出现噪声或线路冲突后丢弃半包并重新同步。 */
     rc100_uart_error_count++;
     __HAL_UART_CLEAR_PEFLAG(huart);
     __HAL_UART_CLEAR_FEFLAG(huart);
@@ -156,7 +153,7 @@ void RC100_GetState(rc100_state_t *state)
         return;
     }
 
-    /* Copy the ISR-owned state atomically. */
+    /* 原子复制由中断更新的遥控器状态。 */
     interrupt_state = __get_PRIMASK();
     __disable_irq();
     state->buttons = rc100_buttons;

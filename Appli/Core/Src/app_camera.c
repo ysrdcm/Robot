@@ -1,12 +1,6 @@
 /**
- ****************************************************************************************************
- * @file        app_camera.c
- * @author      正点原子团队(ALIENTEK)
- * @version     V1.0
- * @date        2025-01-13
- * @brief       app_camera.c文件
- * @license     Copyright (c) 2020-2032, 广州市星翼电子科技有限公司
- ****************************************************************************************************
+ * @file app_camera.c
+ * @brief OV5640 与 DCMIPP 显示、推理管线管理。
  */
 
 #include "app_camera.h"
@@ -20,45 +14,44 @@
 extern DCMIPP_HandleTypeDef hcamera_dcmipp;
 #define hdcmipp hcamera_dcmipp
 
-static void app_camera_display_pipe_init(uint32_t sensor_width, uint32_t sensor_height);
-static void app_camera_nn_pipe_init(uint32_t sensor_width, uint32_t sensor_height);
+static HAL_StatusTypeDef app_camera_display_pipe_init(uint32_t sensor_width, uint32_t sensor_height);
+static HAL_StatusTypeDef app_camera_nn_pipe_init(uint32_t sensor_width, uint32_t sensor_height);
+static HAL_StatusTypeDef app_camera_dcmipp_init(void);
 static void app_camera_init_crop_config(CMW_Manual_roi_area_t *roi, uint32_t sensor_width, uint32_t sensor_height);
+
+#define APP_CAMERA_SENSOR_INIT_RETRIES 3U
 
 static void (*app_camera_display_pipe_vsync_user_cb)(void) = NULL;
 static void (*app_camera_display_pipe_frame_user_cb)(void) = NULL;
 static void (*app_camera_nn_pipe_vsync_user_cb)(void) = NULL;
 static void (*app_camera_nn_pipe_frame_user_cb)(void) = NULL;
-/* Active buffers and modes are retained for thread-context recovery. */
+/* 保存当前缓冲区和采集模式，供控制线程恢复管线。 */
 static volatile uint8_t app_camera_recover_request;
-static uint8_t *app_camera_display_destination;
-static uint8_t *app_camera_nn_destination;
+static uint8_t * volatile app_camera_display_destination;
+static uint8_t * volatile app_camera_nn_destination;
 static uint32_t app_camera_display_capture_mode;
 static uint32_t app_camera_nn_capture_mode;
 
-void app_camera_init(void (*display_pipe_vsync_cb)(void), void (*display_pipe_frame_cb)(void), void (*nn_pipe_vsync_cb)(void), void (*nn_pipe_frame_cb)(void))
+HAL_StatusTypeDef app_camera_init(void (*display_pipe_vsync_cb)(void), void (*display_pipe_frame_cb)(void), void (*nn_pipe_vsync_cb)(void), void (*nn_pipe_frame_cb)(void))
 {
-    DCMIPP_ParallelConfTypeDef pParallelConfig = {0};
+    uint32_t attempt;
 
-    extern HAL_StatusTypeDef MX_DCMIPP_ClockConfig(DCMIPP_HandleTypeDef *hdcmipp);
-    MX_DCMIPP_ClockConfig(&hdcmipp);
+    if (app_camera_dcmipp_init() != HAL_OK)
+    {
+        return HAL_ERROR;
+    }
 
-    hdcmipp.Instance = DCMIPP;
-    HAL_DCMIPP_Init(&hdcmipp);
-
-    /* OV5640 uses the STM32N6 eight-bit parallel DCMIPP interface. */
-    pParallelConfig.PCKPolarity = DCMIPP_PCKPOLARITY_RISING ;
-    pParallelConfig.HSPolarity = DCMIPP_HSPOLARITY_LOW ;
-    pParallelConfig.VSPolarity = DCMIPP_VSPOLARITY_LOW ;
-    pParallelConfig.ExtendedDataMode = DCMIPP_INTERFACE_8BITS;
-    pParallelConfig.Format = DCMIPP_FORMAT_RGB565;
-    pParallelConfig.SwapBits = DCMIPP_SWAPBITS_DISABLE;
-    pParallelConfig.SwapCycles = DCMIPP_SWAPCYCLES_ENABLE;
-    pParallelConfig.SynchroMode = DCMIPP_SYNCHRO_HARDWARE;
-
-    HAL_DCMIPP_PARALLEL_SetConfig(&hdcmipp, &pParallelConfig);
-
-    while (ov5640_init()) {
-        HAL_Delay(500);
+    for (attempt = 0U; attempt < APP_CAMERA_SENSOR_INIT_RETRIES; attempt++)
+    {
+        if (ov5640_init() == 0U)
+        {
+            break;
+        }
+        HAL_Delay(500U);
+    }
+    if (attempt == APP_CAMERA_SENSOR_INIT_RETRIES)
+    {
+        return HAL_ERROR;
     }
 
     ov5640_rgb565_mode();
@@ -69,10 +62,16 @@ void app_camera_init(void (*display_pipe_vsync_cb)(void), void (*display_pipe_fr
     ov5640_contrast(3);
     ov5640_sharpness(33);
     ov5640_focus_constant();
-    ov5640_outsize_set(4, 0, LCD_BG_WIDTH, LCD_BG_HEIGHT);
+    if (ov5640_outsize_set(4, 0, LCD_BG_WIDTH, LCD_BG_HEIGHT) != 0U)
+    {
+        return HAL_ERROR;
+    }
 
-    app_camera_display_pipe_init(LCD_BG_WIDTH, LCD_BG_HEIGHT);
-    app_camera_nn_pipe_init(LCD_BG_WIDTH, LCD_BG_HEIGHT);
+    if ((app_camera_display_pipe_init(LCD_BG_WIDTH, LCD_BG_HEIGHT) != HAL_OK) ||
+        (app_camera_nn_pipe_init(LCD_BG_WIDTH, LCD_BG_HEIGHT) != HAL_OK))
+    {
+        return HAL_ERROR;
+    }
 
     if (display_pipe_vsync_cb != NULL)
     {
@@ -93,6 +92,8 @@ void app_camera_init(void (*display_pipe_vsync_cb)(void), void (*display_pipe_fr
     {
         app_camera_nn_pipe_frame_user_cb = nn_pipe_frame_cb;
     }
+
+    return HAL_OK;
 }
 
 void app_camera_display_pipe_start(uint8_t *display_pipe_destination, uint32_t capture_mode)
@@ -168,12 +169,35 @@ HAL_StatusTypeDef app_camera_recover(void)
         return HAL_ERROR;
     }
 
-    /*
-     * Stop and restart outside the ISR. HAL marks an overrun
-     * pipe ERROR and disables its interrupt, so it cannot self-recover.
-     */
+    /* HAL 在过载后会把管线置为 ERROR，必须在线程中停止并重新启动。 */
     display_status = HAL_DCMIPP_PIPE_Stop(&hdcmipp, DCMIPP_PIPE1);
     nn_status = HAL_DCMIPP_PIPE_Stop(&hdcmipp, DCMIPP_PIPE2);
+
+    if ((display_status != HAL_OK) || (nn_status != HAL_OK))
+    {
+        /*
+         * 管线停止超时后，单纯重试无法清除 HAL 的错误状态。
+         * 复位 DCMIPP 外设并恢复配置，摄像头寄存器无需重新初始化。
+         */
+        __HAL_RCC_DCMIPP_FORCE_RESET();
+        __DSB();
+        __HAL_RCC_DCMIPP_RELEASE_RESET();
+        hdcmipp.State = HAL_DCMIPP_STATE_RESET;
+
+        display_status = app_camera_dcmipp_init();
+        HAL_NVIC_DisableIRQ(DCMIPP_IRQn);
+        if (display_status == HAL_OK)
+        {
+            display_status = app_camera_display_pipe_init(
+                LCD_BG_WIDTH, LCD_BG_HEIGHT);
+            nn_status = app_camera_nn_pipe_init(
+                LCD_BG_WIDTH, LCD_BG_HEIGHT);
+        }
+        else
+        {
+            nn_status = HAL_ERROR;
+        }
+    }
 
     if ((display_status == HAL_OK) && (nn_status == HAL_OK))
     {
@@ -183,7 +207,11 @@ HAL_StatusTypeDef app_camera_recover(void)
             &hdcmipp,
             DCMIPP_FLAG_AXI_TRANSFER_ERROR |
             DCMIPP_FLAG_PARALLEL_SYNC_ERROR |
+            DCMIPP_FLAG_PIPE1_FRAME |
+            DCMIPP_FLAG_PIPE1_VSYNC |
             DCMIPP_FLAG_PIPE1_OVR |
+            DCMIPP_FLAG_PIPE2_FRAME |
+            DCMIPP_FLAG_PIPE2_VSYNC |
             DCMIPP_FLAG_PIPE2_OVR);
 
         display_status = HAL_DCMIPP_PIPE_Start(
@@ -194,7 +222,7 @@ HAL_StatusTypeDef app_camera_recover(void)
             &hdcmipp, DCMIPP_PIPE2,
             (uint32_t)nn_destination,
             nn_capture_mode);
-        /* HAL disables these interrupt sources after a global error. */
+        /* HAL 处理全局错误时会关闭这些中断源。 */
         __HAL_DCMIPP_ENABLE_IT(
             &hdcmipp,
             DCMIPP_IT_AXI_TRANSFER_ERROR |
@@ -214,10 +242,40 @@ HAL_StatusTypeDef app_camera_recover(void)
 
 void app_camera_isp_update(void)
 {
-    // 置空即可，OV5640 自带硬件 ISP
+    /* OV5640 使用片内 ISP，无需逐帧更新 STM32 ISP 参数。 */
 }
 
-static void app_camera_display_pipe_init(uint32_t sensor_width, uint32_t sensor_height)
+static HAL_StatusTypeDef app_camera_dcmipp_init(void)
+{
+    DCMIPP_ParallelConfTypeDef parallel_config = {0};
+    extern HAL_StatusTypeDef MX_DCMIPP_ClockConfig(
+        DCMIPP_HandleTypeDef *hdcmipp);
+
+    if (MX_DCMIPP_ClockConfig(&hdcmipp) != HAL_OK)
+    {
+        return HAL_ERROR;
+    }
+
+    hdcmipp.Instance = DCMIPP;
+    if (HAL_DCMIPP_Init(&hdcmipp) != HAL_OK)
+    {
+        return HAL_ERROR;
+    }
+
+    /* OV5640 通过 STM32N6 的 8 位并行接口输出 RGB565。 */
+    parallel_config.PCKPolarity = DCMIPP_PCKPOLARITY_RISING;
+    parallel_config.HSPolarity = DCMIPP_HSPOLARITY_LOW;
+    parallel_config.VSPolarity = DCMIPP_VSPOLARITY_LOW;
+    parallel_config.ExtendedDataMode = DCMIPP_INTERFACE_8BITS;
+    parallel_config.Format = DCMIPP_FORMAT_RGB565;
+    parallel_config.SwapBits = DCMIPP_SWAPBITS_DISABLE;
+    parallel_config.SwapCycles = DCMIPP_SWAPCYCLES_ENABLE;
+    parallel_config.SynchroMode = DCMIPP_SYNCHRO_HARDWARE;
+
+    return HAL_DCMIPP_PARALLEL_SetConfig(&hdcmipp, &parallel_config);
+}
+
+static HAL_StatusTypeDef app_camera_display_pipe_init(uint32_t sensor_width, uint32_t sensor_height)
 {
     CMW_DCMIPP_Conf_t cmw_dcmipp_conf = {0};
     uint32_t hw_pitch;
@@ -230,10 +288,12 @@ static void app_camera_display_pipe_init(uint32_t sensor_width, uint32_t sensor_
     cmw_dcmipp_conf.enable_gamma_conversion = 0;
     cmw_dcmipp_conf.mode = CMW_Aspect_ratio_manual_roi;
     app_camera_init_crop_config(&cmw_dcmipp_conf.manual_conf, sensor_width, sensor_height);
-    CMW_CAMERA_SetPipeConfig(DCMIPP_PIPE1, &cmw_dcmipp_conf, &hw_pitch);
+    return (CMW_CAMERA_SetPipeConfig(DCMIPP_PIPE1, &cmw_dcmipp_conf,
+                                     &hw_pitch) == CMW_ERROR_NONE) ?
+           HAL_OK : HAL_ERROR;
 }
 
-static void app_camera_nn_pipe_init(uint32_t sensor_width, uint32_t sensor_height)
+static HAL_StatusTypeDef app_camera_nn_pipe_init(uint32_t sensor_width, uint32_t sensor_height)
 {
     CMW_DCMIPP_Conf_t cmw_dcmipp_conf = {0};
     uint32_t hw_pitch;
@@ -246,7 +306,9 @@ static void app_camera_nn_pipe_init(uint32_t sensor_width, uint32_t sensor_heigh
     cmw_dcmipp_conf.enable_gamma_conversion = 0;
     cmw_dcmipp_conf.mode = CMW_Aspect_ratio_manual_roi;
     app_camera_init_crop_config(&cmw_dcmipp_conf.manual_conf, sensor_width, sensor_height);
-    CMW_CAMERA_SetPipeConfig(DCMIPP_PIPE2, &cmw_dcmipp_conf, &hw_pitch);
+    return (CMW_CAMERA_SetPipeConfig(DCMIPP_PIPE2, &cmw_dcmipp_conf,
+                                     &hw_pitch) == CMW_ERROR_NONE) ?
+           HAL_OK : HAL_ERROR;
 }
 
 static void app_camera_init_crop_config(CMW_Manual_roi_area_t *roi, uint32_t sensor_width, uint32_t sensor_height)
@@ -268,6 +330,8 @@ static void app_camera_init_crop_config(CMW_Manual_roi_area_t *roi, uint32_t sen
 HAL_StatusTypeDef MX_DCMIPP_ClockConfig(DCMIPP_HandleTypeDef *hdcmipp)
 {
     RCC_PeriphCLKInitTypeDef rcc_periph_clk_init_struct = {0};
+
+    (void)hdcmipp;
 
     rcc_periph_clk_init_struct.PeriphClockSelection = RCC_PERIPHCLK_DCMIPP | RCC_PERIPHCLK_CSI;
     rcc_periph_clk_init_struct.DcmippClockSelection = RCC_DCMIPPCLKSOURCE_IC17;
@@ -331,7 +395,7 @@ void HAL_DCMIPP_PIPE_ErrorCallback(DCMIPP_HandleTypeDef *hdcmipp,
     (void)Pipe;
     if (hdcmipp->Instance == DCMIPP)
     {
-        /* Blocking recovery is deferred to the control thread. */
+        /* 阻塞式恢复交给控制线程执行。 */
         app_camera_recover_request = 1U;
     }
 }
@@ -340,7 +404,7 @@ void HAL_DCMIPP_ErrorCallback(DCMIPP_HandleTypeDef *hdcmipp)
 {
     if (hdcmipp->Instance == DCMIPP)
     {
-        /* Covers parallel-sync and AXI transfer errors. */
+        /* 覆盖并行同步错误和 AXI 传输错误。 */
         app_camera_recover_request = 1U;
     }
 }

@@ -1,19 +1,7 @@
-/**
- ****************************************************************************************************
- * @file        uart.c
- * @author      正点原子团队(ALIENTEK)
- * @version     V1.0
- * @date        2025-01-13
- * @brief       串口驱动代码
- * @license     Copyright (c) 2020-2032, 广州市星翼电子科技有限公司
- ****************************************************************************************************
- */
-
 #include "uart.h"
 #include "esp8266_log.h"
 #include "rc100.h"
 
-/* UART句柄 */
 extern UART_HandleTypeDef huart1;
 
 #if UART_EN_RX
@@ -25,37 +13,19 @@ uint8_t g_uart_rx_buf[UART_REC_LEN];
 uint16_t g_uart_rx_sta = 0;
 #endif
 
-/**
- * @brief   初始化串口
- * @param   baudrate: 通信波特率（单位：bps）
- * @retval  无
- */
-void uart_init(uint32_t baudrate)
+void uart_stdio_init(void)
 {
-    UNUSED(baudrate);
-
     setvbuf(stdout, NULL, _IONBF, 0);
 
 #if UART_EN_RX
-    /* UART中断接收数据 */
+    /* 可选控制台模式使用 HAL 单字节中断接收。 */
     HAL_UART_Receive_IT(&huart1, g_rx_buffer, sizeof(g_rx_buffer));
 #endif
 }
 
 #if UART_EN_RX
-/**
- * @brief   HAL库UART接收完成回调函数
- * @param   huart: UART句柄指针
- * @retval  无
- */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-    if (huart->Instance == USART1)
-    {
-        RC100_UART_RxCpltCallback(huart);
-        return;
-    }
-
     if (huart->Instance == UART4)
     {
         ESP8266_Log_UART_RxCpltCallback(huart);
@@ -99,10 +69,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     }
 }
 #else
-/*
- * BSP_UART_RX_DISABLE applies only to the USART1 console.
- * UART4 must still dispatch ESP-01S receive-complete interrupts.
- */
+/* 禁用 USART1 控制台接收时，UART4 仍需分发 ESP-01S 接收回调。 */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1)
@@ -120,7 +87,17 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1)
     {
+#if UART_EN_RX
+        __HAL_UART_CLEAR_PEFLAG(huart);
+        __HAL_UART_CLEAR_FEFLAG(huart);
+        __HAL_UART_CLEAR_NEFLAG(huart);
+        __HAL_UART_CLEAR_OREFLAG(huart);
+        huart->ErrorCode = HAL_UART_ERROR_NONE;
+        (void)HAL_UART_Receive_IT(&huart1, g_rx_buffer,
+                                  sizeof(g_rx_buffer));
+#else
         RC100_UART_ErrorCallback(huart);
+#endif
     }
     else if (huart->Instance == UART4)
     {
@@ -128,14 +105,12 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     }
 }
 
-/**
- * @brief   重定向C库的printf函数到串口
- * @param   无
- * @retval  无
- */
+/* USART1 用于 BT-410 时禁止 printf 占用遥控链路。 */
 int __io_putchar(int ch)
 {
+#if UART_EN_RX
     HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xFFFF);
+#endif
 
     return ch;
 }

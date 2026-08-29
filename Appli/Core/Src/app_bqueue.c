@@ -1,14 +1,3 @@
-/**
- ****************************************************************************************************
- * @file        app_bqueue.c
- * @author      正点原子团队(ALIENTEK)
- * @version     V1.0
- * @date        2025-01-13
- * @brief       app_bqueue.c文件
- * @license     Copyright (c) 2020-2032, 广州市星翼电子科技有限公司
- ****************************************************************************************************
- */
-
 #include "app_bqueue.h"
 
 UINT app_bqueue_init(app_bqueue_t *bqueue, uint8_t buffer_nb, uint8_t **buffers)

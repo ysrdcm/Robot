@@ -8,7 +8,7 @@ extern TIM_HandleTypeDef htim9;
 #define ECHO_PORT GPIOF
 #define ECHO_PIN  GPIO_PIN_7
 #define ECHO_TIM_CHANNEL TIM_CHANNEL_1
-/* 30 ms covers the HC-SR04 echo window without delaying control indefinitely. */
+/* 30 ms 可覆盖 HC-SR04 回波窗口，并限制控制线程的最长等待时间。 */
 #define WAVE_TIMEOUT_TICKS 30U
 
 TX_SEMAPHORE wave_sem;
@@ -35,7 +35,7 @@ HAL_StatusTypeDef Wave_Init(void)
     return HAL_OK;
 }
 
-/* Used only to form the HC-SR04 trigger pulse. */
+/* 仅用于产生 HC-SR04 触发脉冲。 */
 static void delay_us(uint32_t us)
 {
     uint16_t start = (uint16_t)__HAL_TIM_GET_COUNTER(&htim9);
@@ -54,7 +54,7 @@ float Wave_Get_Distance(void)
         return -1.0f;
     }
 
-    /* Drain a stale completion left by a timed-out measurement. */
+    /* 清除上一次超时测量可能残留的完成信号。 */
     while (tx_semaphore_get(&wave_sem, TX_NO_WAIT) == TX_SUCCESS) { }
 
     interrupt_state = __get_PRIMASK();
@@ -65,7 +65,7 @@ float Wave_Get_Distance(void)
     __HAL_TIM_SET_CAPTUREPOLARITY(&htim9, ECHO_TIM_CHANNEL, TIM_INPUTCHANNELPOLARITY_RISING);
     __HAL_TIM_CLEAR_IT(&htim9, TIM_IT_CC1);
 
-    /* Arm capture before triggering so the rising echo edge cannot be missed. */
+    /* 先启动捕获再触发，避免漏掉回波上升沿。 */
     start_status = HAL_TIM_IC_Start_IT(&htim9, ECHO_TIM_CHANNEL);
     if (start_status != HAL_OK)
     {
@@ -100,7 +100,7 @@ float Wave_Get_Distance(void)
         }
         else
         {
-            /* The falling edge arrived at the timeout boundary. */
+            /* 回波下降沿恰好在超时边界到达。 */
             distance = (float)high_time * 0.017f;
         }
         if (interrupt_state == 0U)
@@ -116,7 +116,7 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == TIM9)
     {
-        /* Ignore a late callback from a measurement that already timed out. */
+        /* 忽略已超时测量产生的迟到回调。 */
         if (wave_waiting == 0)
         {
             return;
@@ -130,7 +130,7 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
         else if (capture_state == 1)
         {
             capture_val2 = HAL_TIM_ReadCapturedValue(htim, ECHO_TIM_CHANNEL);
-            /* Unsigned subtraction handles one 16-bit timer wrap. */
+            /* 无符号减法可正确处理一次 16 位计数器回绕。 */
             high_time = (uint16_t)(capture_val2 - capture_val1);
             HAL_TIM_IC_Stop_IT(htim, ECHO_TIM_CHANNEL);
             wave_waiting = 0;
