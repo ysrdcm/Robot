@@ -177,7 +177,8 @@ static int32_t bsp_lcd_fill_rgb_rect(uint32_t instance, uint32_t x_pos, uint32_t
     for (i = 0; i < height; i++)
     {
         address = hltdc.LayerCfg[bsp_lcd.active_layer].FBStartAdress + (bsp_lcd.bpp_factor * ((bsp_lcd.x_size * (y_pos + i)) + x_pos));
-        SCB_CleanDCache_by_Addr((uint32_t *)data, bsp_lcd.bpp_factor * bsp_lcd.x_size);
+        SCB_CleanDCache_by_Addr((uint32_t *)data,
+                               bsp_lcd.bpp_factor * width);
         bsp_lcd_convert_line_to_rgb((uint32_t *)data, (uint32_t *)address, width, input_color_mode);
         data += bsp_lcd.bpp_factor * width;
     }
@@ -223,8 +224,13 @@ static int32_t bsp_lcd_get_pixel(uint32_t instance, uint32_t x_pos, uint32_t y_p
     }
     else if (hltdc.LayerCfg[bsp_lcd.active_layer].PixelFormat == LTDC_PIXEL_FORMAT_RGB888)
     {
-        *color = *(__IO uint32_t *)(hltdc.LayerCfg[bsp_lcd.active_layer].FBStartAdress + (3 * ((bsp_lcd.x_size * y_pos) + x_pos)));
-        *color = CONVERTARGB88882RGB888(*color);
+        __IO uint8_t *pixel = (__IO uint8_t *)(
+            hltdc.LayerCfg[bsp_lcd.active_layer].FBStartAdress +
+            (3U * ((bsp_lcd.x_size * y_pos) + x_pos)));
+
+        *color = (uint32_t)pixel[0] |
+                 ((uint32_t)pixel[1] << 8) |
+                 ((uint32_t)pixel[2] << 16);
     }
     else
     {
@@ -242,9 +248,13 @@ static int32_t bsp_lcd_set_pixel(uint32_t instance, uint32_t x_pos, uint32_t y_p
     }
     else if (hltdc.LayerCfg[bsp_lcd.active_layer].PixelFormat == LTDC_PIXEL_FORMAT_RGB888)
     {
-        *(__IO uint8_t *)(hltdc.LayerCfg[bsp_lcd.active_layer].FBStartAdress + ((3 * ((bsp_lcd.x_size * y_pos) + x_pos)) - 3)) = (uint8_t)color;
-        *(__IO uint8_t *)(hltdc.LayerCfg[bsp_lcd.active_layer].FBStartAdress + ((3 * ((bsp_lcd.x_size * y_pos) + x_pos)) - 2)) = (uint8_t)(color >> 8);
-        *(__IO uint8_t *)(hltdc.LayerCfg[bsp_lcd.active_layer].FBStartAdress + ((3 * ((bsp_lcd.x_size * y_pos) + x_pos)) - 1)) = (uint8_t)(color >> 16);
+        __IO uint8_t *pixel = (__IO uint8_t *)(
+            hltdc.LayerCfg[bsp_lcd.active_layer].FBStartAdress +
+            (3U * ((bsp_lcd.x_size * y_pos) + x_pos)));
+
+        pixel[0] = (uint8_t)color;
+        pixel[1] = (uint8_t)(color >> 8);
+        pixel[2] = (uint8_t)(color >> 16);
     }
     else
     {

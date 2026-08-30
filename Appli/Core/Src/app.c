@@ -632,6 +632,12 @@ static VOID ctrl_thread_entry(ULONG id)
             Car_Stop();
             Laser_Fire(0U);
             BEEP(0);
+            /* 恢复后从静止巡防态重新决策，不续跑故障前的定时动作。 */
+            Track_Reset();
+            state = STATE_PATROL;
+            state_start_time = now;
+            lock_width = 0.0f;
+            lock_height = 0.0f;
 
             tx_mutex_get(&ai_data_lock, TX_WAIT_FOREVER);
             app_reset_person_detection();
@@ -697,6 +703,7 @@ static VOID ctrl_thread_entry(ULONG id)
                 manual_mode = 1U;
                 rc100_manual_mode_display = 1U;
                 Car_Stop();
+                Track_Reset();
                 Laser_Fire(0U);
                 BEEP(0);
                 Camera_Servo_Manual_Update(0);
@@ -711,6 +718,7 @@ static VOID ctrl_thread_entry(ULONG id)
                 /* 恢复自动巡防前先关闭人工模式下的全部输出。 */
                 mode_button_armed = 0U;
                 Car_Stop();
+                Track_Reset();
                 Laser_Fire(0U);
                 BEEP(0);
                 state = STATE_PATROL;
@@ -755,6 +763,7 @@ static VOID ctrl_thread_entry(ULONG id)
 
                 if (p_det) {
                     Car_Stop();
+                    Track_Reset();
                     state = STATE_WARNING;
                     state_start_time = HAL_GetTick();
                     /* 保存初始目标框尺寸，用于判断人员是否靠近。 */
@@ -763,6 +772,7 @@ static VOID ctrl_thread_entry(ULONG id)
                 }
                 else if (dist > 0 && dist < 25.0f) {
                     Car_Stop();
+                    Track_Reset();
                     state = STATE_AVOID;
                     state_start_time = HAL_GetTick();
                 }
@@ -1129,6 +1139,8 @@ static VOID nn_thread_entry(ULONG id)
         }
 
         time_stamp = HAL_GetTick();
+        /* DCMIPP 直接写入外部 RAM，CPU 读取前必须丢弃旧缓存行。 */
+        SCB_InvalidateDCache_by_Addr(capture_buffer, nn_in_len);
         LL_ATON_Set_User_Input_Buffer_Default(0, capture_buffer, nn_in_len);
         SCB_InvalidateDCache_by_Addr(output_buffer, nn_out_len);
         LL_ATON_Set_User_Output_Buffer_Default(0, output_buffer, nn_out_len);

@@ -11,6 +11,7 @@ extern TIM_HandleTypeDef htim4;
 #define SERVO_TILT_MAX                  2000.0f
 /* 限制单次变化量，避免检测抖动造成云台突跳。 */
 #define SERVO_TRACK_MAX_STEP               3.0f
+#define GIMBAL_UPDATE_PERIOD_MS            20U
 #define GIMBAL_DETECTION_HOLD_MS          300U
 
 /* 摄像头和云台均用 PWM 微秒值标定，向车体右侧转动时 PWM 减小。 */
@@ -58,6 +59,20 @@ void Gimbal_Targeting_Update(float target_x, float target_y,
     static float filtered_x = 0.5f;
     static float filtered_y = 0.5f;
     static uint32_t last_detect_tick;
+    static uint32_t last_update_tick;
+    uint32_t now = HAL_GetTick();
+
+    if (is_detected != 0U)
+    {
+        last_detect_tick = now;
+    }
+
+    /* 按真实时间限制云台速度，避免速度随控制线程频率变化。 */
+    if ((now - last_update_tick) < GIMBAL_UPDATE_PERIOD_MS)
+    {
+        return;
+    }
+    last_update_tick = now;
 
     if (is_detected != 0U)
     {
@@ -66,7 +81,6 @@ void Gimbal_Targeting_Update(float target_x, float target_y,
         float target_pwm_pan;
         float target_pwm_tilt;
 
-        last_detect_tick = HAL_GetTick();
         if (fabsf(target_x - filtered_x) > 0.05f)
         {
             filtered_x = filtered_x * 0.90f + target_x * 0.10f;
@@ -104,7 +118,7 @@ void Gimbal_Targeting_Update(float target_x, float target_y,
             Servo_Smooth_Step(current_pwm_tilt, target_pwm_tilt, 0.06f);
     }
     else if ((last_detect_tick == 0U) ||
-             ((HAL_GetTick() - last_detect_tick) >
+             ((now - last_detect_tick) >
               GIMBAL_DETECTION_HOLD_MS))
     {
         /* 短暂丢检时保持位置，超时后再回中。 */

@@ -18,6 +18,12 @@
 
 typedef void (*Track_Action_t)(void);
 
+static uint8_t track_candidate_pattern = TRACK_PATTERN_ALL_WHITE;
+static uint8_t track_candidate_count;
+static uint8_t track_line_lost_active;
+static uint32_t track_line_lost_start_tick;
+static Track_Action_t track_last_action = Car_Stop;
+
 static uint8_t Track_Read_Pattern(void)
 {
     uint8_t o4 = (HAL_GPIO_ReadPin(O4_PORT, O4_PIN) == GPIO_PIN_SET) ?
@@ -69,59 +75,84 @@ static Track_Action_t Track_Get_Action(uint8_t pattern)
 
 void Track_Process(void)
 {
-    static uint8_t candidate_pattern = TRACK_PATTERN_ALL_WHITE;
-    static uint8_t candidate_count;
-    static uint8_t line_lost_active;
-    static uint32_t line_lost_start_tick;
-    static Track_Action_t last_action = Car_Stop;
     uint8_t raw_pattern = Track_Read_Pattern();
 
     /* 全白时短暂保持上次确认动作，按真实毫秒计时，超时后停车。 */
     if (raw_pattern == TRACK_PATTERN_ALL_WHITE)
     {
-        candidate_pattern = TRACK_PATTERN_ALL_WHITE;
-        candidate_count = 0U;
+        track_candidate_pattern = TRACK_PATTERN_ALL_WHITE;
+        track_candidate_count = 0U;
 
-        if (line_lost_active == 0U)
+        if (track_line_lost_active == 0U)
         {
-            line_lost_active = 1U;
-            line_lost_start_tick = HAL_GetTick();
+            track_line_lost_active = 1U;
+            track_line_lost_start_tick = HAL_GetTick();
         }
 
-        if ((HAL_GetTick() - line_lost_start_tick) < TRACK_LINE_LOST_HOLD_MS)
+        if ((HAL_GetTick() - track_line_lost_start_tick) < TRACK_LINE_LOST_HOLD_MS)
         {
-            last_action();
+            track_last_action();
         }
         else
         {
             /* 停车后必须等新的非零码型连续确认三次才恢复动作。 */
-            last_action = Car_Stop;
+            track_last_action = Car_Stop;
             Car_Stop();
         }
         return;
     }
 
-    if (raw_pattern != candidate_pattern)
+    if (raw_pattern != track_candidate_pattern)
     {
-        candidate_pattern = raw_pattern;
-        candidate_count = 1U;
+        track_candidate_pattern = raw_pattern;
+        track_candidate_count = 1U;
     }
-    else if (candidate_count < TRACK_PATTERN_CONFIRM_SAMPLES)
+    else if (track_candidate_count < TRACK_PATTERN_CONFIRM_SAMPLES)
     {
-        candidate_count++;
+        track_candidate_count++;
     }
 
-    if (candidate_count >= TRACK_PATTERN_CONFIRM_SAMPLES)
+    if (track_candidate_count >= TRACK_PATTERN_CONFIRM_SAMPLES)
     {
         /* 只有连续确认三次的非零码型才能更新动作并清除丢线计时。 */
-        last_action = Track_Get_Action(candidate_pattern);
-        line_lost_active = 0U;
+        track_last_action = Track_Get_Action(track_candidate_pattern);
+        track_line_lost_active = 0U;
     }
 
-    last_action();
+    track_last_action();
+}
+
+void Track_Reset(void)
+{
+    /* 离开巡线状态后清除旧动作，避免重新进入全白区域时误动作。 */
+    track_candidate_pattern = TRACK_PATTERN_ALL_WHITE;
+    track_candidate_count = 0U;
+    track_line_lost_active = 0U;
+    track_line_lost_start_tick = 0U;
+    track_last_action = Car_Stop;
 }
 
 uint8_t Check_Black_Line(void)
 {
-    return (Track_Read_Pattern() != TRACK_PATTERN_ALL_WHITE) ? 1U : 0U;
+    uint8_t raw_pattern = Track_Read_Pattern();
+
+    if (raw_pattern == TRACK_PATTERN_ALL_WHITE)
+    {
+        track_candidate_pattern = TRACK_PATTERN_ALL_WHITE;
+        track_candidate_count = 0U;
+        return 0U;
+    }
+
+    if (raw_pattern != track_candidate_pattern)
+    {
+        track_candidate_pattern = raw_pattern;
+        track_candidate_count = 1U;
+    }
+    else if (track_candidate_count < TRACK_PATTERN_CONFIRM_SAMPLES)
+    {
+        track_candidate_count++;
+    }
+
+    /* 避障结束时也要求同一码型连续出现三次，避免毛刺误判为重新入线。 */
+    return (track_candidate_count >= TRACK_PATTERN_CONFIRM_SAMPLES) ? 1U : 0U;
 }
